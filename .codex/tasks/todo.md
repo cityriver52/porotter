@@ -17,4 +17,4 @@
 - Browser flows: create post, add tag, reply, search, settings navigation passed
 - GitHub: `cityriver52/mySNS`, private, `main` branch
 - GAS: 8 files pushed with clasp and verified byte-for-byte
-- Deployment: `mySNS Data` initialized and web app version 2 loaded successfully
+- Deployment: `mySNS Data` initialized and web app version 3 loaded successfully
