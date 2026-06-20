@@ -61,7 +61,12 @@
       return reply;
     },
     apiUpdateReply: (id, payload) => { const reply = replies.find(item => item.id === id); reply.body = payload.body; reply.updatedAt = new Date().toISOString(); return reply; },
-    apiDeleteReply: id => { replies = replies.filter(item => item.id !== id); return { id }; },
+    apiDeleteReply: id => {
+      const reply = replies.find(item => item.id === id);
+      if (reply) posts.find(item => item.id === reply.postId).replyCount = Math.max(0, posts.find(item => item.id === reply.postId).replyCount - 1);
+      replies = replies.filter(item => item.id !== id);
+      return { id };
+    },
     apiTrash: () => ({ posts: posts.filter(post => post.deletedAt), retentionDays: 30 }),
     apiRestorePost: id => { posts.find(item => item.id === id).deletedAt = ''; return { id }; },
     apiPermanentlyDeletePost: id => { posts = posts.filter(item => item.id !== id); replies = replies.filter(item => item.postId !== id); return { id }; },

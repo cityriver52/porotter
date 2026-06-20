@@ -1,10 +1,18 @@
 # mySNS implementation checklist
 
 - [x] Define the MVP architecture and data model
-- [ ] Implement the Apps Script data layer and APIs
-- [ ] Implement the responsive SNS-style UI
-- [ ] Add local validation and tests
-- [ ] Document setup and deployment
-- [ ] Initialize Git and commit the initial version
-- [ ] Publish the `mySNS` repository to GitHub
-- [ ] Audit every MVP acceptance criterion
+- [x] Implement the Apps Script data layer and APIs
+- [x] Implement the responsive SNS-style UI
+- [x] Add local validation and tests
+- [x] Document setup and deployment
+- [x] Initialize Git and commit the initial version
+- [x] Publish the `mySNS` repository to GitHub
+- [x] Audit every MVP acceptance criterion
+
+## Verification
+
+- Static check: 4 GAS files and 57 unique DOM IDs passed
+- Automated tests: 3/3 passed (CRUD, replies, filters, pagination, trash, export, settings, authorization)
+- Browser: desktop and 390 × 844 responsive layouts passed
+- Browser flows: create post, add tag, reply, search, settings navigation passed
+- GitHub: `cityriver52/mySNS`, private, `main` branch

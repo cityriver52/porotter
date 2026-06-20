@@ -62,16 +62,13 @@ function apiDeletePost(postId) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
       const timestamp = nowIso_();
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: timestamp, updatedAt: timestamp });
+      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: timestamp });
       readRecords_(CONFIG_.SHEETS.REPLIES)
         .filter(function (reply) {
           return String(reply.postId) === String(postId) && !reply.deletedAt;
         })
         .forEach(function (reply) {
-          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, {
-            deletedAt: timestamp,
-            updatedAt: timestamp
-          });
+          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
         });
       return { id: post.id, deletedAt: timestamp };
     });
@@ -146,10 +143,7 @@ function apiDeleteReply(replyId) {
       const reply = ownedRecord_(CONFIG_.SHEETS.REPLIES, replyId, email);
       assertNotDeleted_(reply);
       const timestamp = nowIso_();
-      patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, {
-        deletedAt: timestamp,
-        updatedAt: timestamp
-      });
+      patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
       return { id: reply.id, deletedAt: timestamp };
     });
   });
@@ -176,14 +170,13 @@ function apiRestorePost(postId) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       if (!post.deletedAt) throw new Error('この投稿は削除されていません。');
       const cascadeTimestamp = String(post.deletedAt);
-      const timestamp = nowIso_();
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: '', updatedAt: timestamp });
+      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: '' });
       readRecords_(CONFIG_.SHEETS.REPLIES)
         .filter(function (reply) {
           return String(reply.postId) === String(postId) && String(reply.deletedAt) === cascadeTimestamp;
         })
         .forEach(function (reply) {
-          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: '', updatedAt: timestamp });
+          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: '' });
         });
       return { id: post.id };
     });

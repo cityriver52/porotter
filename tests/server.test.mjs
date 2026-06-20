@@ -175,3 +175,43 @@ test('validation and authorization are enforced on the server', () => {
   assert.equal(denied.ok, false);
   assert.match(denied.error, /権限/);
 });
+
+test('timeline filters, pagination, settings and permanent deletion work', () => {
+  const app = createContext();
+  app.setupMySNS();
+
+  const created = [];
+  for (let index = 0; index < 7; index += 1) {
+    created.push(app.apiCreatePost({
+      body: `投稿 ${index}`,
+      tags: index % 2 === 0 ? ['偶数'] : ['奇数']
+    }).data);
+  }
+  app.apiCreateReply(created[0].id, { body: '返信あり' });
+
+  const firstPage = app.apiTimeline({ pageSize: 5 });
+  assert.equal(firstPage.data.posts.length, 5);
+  assert.equal(firstPage.data.hasMore, true);
+  const secondPage = app.apiTimeline({ pageSize: 5, offset: firstPage.data.nextOffset });
+  assert.equal(secondPage.data.posts.length, 2);
+  assert.equal(secondPage.data.hasMore, false);
+
+  assert.equal(app.apiTimeline({ tag: '偶数' }).data.total, 4);
+  assert.equal(app.apiTimeline({ replyState: 'with' }).data.total, 1);
+  assert.equal(app.apiTimeline({ replyState: 'without' }).data.total, 6);
+
+  const today = app.Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+  assert.equal(app.apiTimeline({ startDate: today, endDate: today }).data.total, 7);
+  assert.equal(app.apiTimeline({ startDate: '1990-01-01', endDate: '1990-01-02' }).data.total, 0);
+
+  const settings = app.apiSaveSettings({ displayName: '考える人', theme: 'dark', pageSize: 30 });
+  assert.equal(settings.data.displayName, '考える人');
+  assert.equal(settings.data.theme, 'dark');
+  assert.equal(settings.data.pageSize, 30);
+
+  app.apiDeletePost(created[1].id);
+  assert.equal(app.apiTrash().data.posts.length, 1);
+  app.apiPermanentlyDeletePost(created[1].id);
+  assert.equal(app.apiTrash().data.posts.length, 0);
+  assert.equal(app.apiTimeline({}).data.total, 6);
+});
