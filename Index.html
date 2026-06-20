@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <base target="_top">
+    <meta charset="UTF-8">
+    <meta name="color-scheme" content="light dark">
+    <title>mySNS</title>
+    <?!= include_('Styles'); ?>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">本文へ移動</a>
+
+    <div id="app" class="app-shell" aria-busy="true">
+      <aside class="side-nav" aria-label="メインメニュー">
+        <div class="brand" aria-label="mySNS">
+          <span class="brand-mark" aria-hidden="true">m</span>
+          <span class="brand-name">mySNS</span>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" type="button" data-view="timeline" aria-current="page">
+            <span aria-hidden="true">⌂</span><span>ホーム</span>
+          </button>
+          <button class="nav-item" type="button" data-view="favorites">
+            <span aria-hidden="true">♡</span><span>お気に入り</span>
+          </button>
+          <button class="nav-item" type="button" data-view="trash">
+            <span aria-hidden="true">♲</span><span>ごみ箱</span>
+          </button>
+          <button class="nav-item" type="button" data-view="settings">
+            <span aria-hidden="true">⚙</span><span>設定</span>
+          </button>
+        </nav>
+
+        <button id="side-compose-button" class="primary-button side-compose" type="button">
+          つぶやく
+        </button>
+
+        <div class="profile-chip">
+          <span class="avatar" data-avatar>me</span>
+          <span class="profile-copy">
+            <strong data-display-name>読み込み中</strong>
+            <small>非公開アカウント</small>
+          </span>
+        </div>
+      </aside>
+
+      <main id="main-content" class="main-column" tabindex="-1">
+        <section id="timeline-view" class="view-panel active" data-view-panel="timeline">
+          <header class="column-header">
+            <div>
+              <p class="eyebrow">PRIVATE TIMELINE</p>
+              <h1 id="timeline-title">ホーム</h1>
+            </div>
+            <button id="mobile-theme-button" class="icon-button" type="button" aria-label="テーマを切り替える">◐</button>
+          </header>
+
+          <section id="composer" class="composer-card" aria-labelledby="composer-heading">
+            <span class="avatar" data-avatar>me</span>
+            <form id="post-form" class="composer-form">
+              <h2 id="composer-heading" class="sr-only">新しい投稿</h2>
+              <label class="sr-only" for="post-body">いま、何を感じていますか？</label>
+              <textarea id="post-body" rows="3" maxlength="280" placeholder="いま、何を感じていますか？" required></textarea>
+
+              <div id="quick-tags" class="quick-tags" aria-label="クイックタグ">
+                <button type="button" class="tag-toggle" data-quick-tag="アイデア">#アイデア</button>
+                <button type="button" class="tag-toggle" data-quick-tag="違和感">#違和感</button>
+                <button type="button" class="tag-toggle" data-quick-tag="学び">#学び</button>
+                <button type="button" class="tag-toggle" data-quick-tag="あとで考える">#あとで考える</button>
+              </div>
+
+              <div class="composer-footer">
+                <label class="tag-input-wrap" for="post-tags">
+                  <span aria-hidden="true">#</span>
+                  <input id="post-tags" type="text" placeholder="タグ（空白区切り・5個まで）" autocomplete="off">
+                </label>
+                <span id="post-count" class="character-count" aria-live="polite">0 / 280</span>
+                <button id="post-submit" class="primary-button" type="submit">投稿する</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="filter-section" aria-label="投稿を検索">
+            <form id="filter-form" class="filter-form">
+              <label class="search-box" for="search-input">
+                <span aria-hidden="true">⌕</span>
+                <input id="search-input" type="search" placeholder="自分のつぶやきを検索">
+              </label>
+              <button class="primary-button filter-submit" type="submit">検索</button>
+              <button id="filter-toggle" class="secondary-button" type="button" aria-expanded="false" aria-controls="advanced-filters">絞り込み</button>
+            </form>
+            <div id="advanced-filters" class="advanced-filters" hidden>
+              <label>開始日<input id="start-date" type="date"></label>
+              <label>終了日<input id="end-date" type="date"></label>
+              <label>返信
+                <select id="reply-state">
+                  <option value="">すべて</option>
+                  <option value="with">返信あり</option>
+                  <option value="without">返信なし</option>
+                </select>
+              </label>
+              <button id="clear-filters" class="text-button" type="button">条件をクリア</button>
+            </div>
+            <div id="active-filter-summary" class="active-filter-summary" aria-live="polite"></div>
+            <div id="tag-filter-list" class="tag-filter-list" aria-label="タグで絞り込む"></div>
+          </section>
+
+          <div id="timeline-status" class="timeline-status" role="status" aria-live="polite"></div>
+          <div id="timeline" class="timeline" aria-label="投稿一覧"></div>
+          <div class="load-more-wrap">
+            <button id="load-more" class="secondary-button" type="button" hidden>さらに読み込む</button>
+          </div>
+        </section>
+
+        <section id="trash-view" class="view-panel" data-view-panel="trash" hidden>
+          <header class="column-header">
+            <div><p class="eyebrow">RECOVERABLE</p><h1>ごみ箱</h1></div>
+          </header>
+          <div class="notice-card">削除した投稿はここから復元できます。完全に削除すると元に戻せません。</div>
+          <div id="trash-list" class="timeline"></div>
+        </section>
+
+        <section id="settings-view" class="view-panel" data-view-panel="settings" hidden>
+          <header class="column-header">
+            <div><p class="eyebrow">YOUR SPACE</p><h1>設定</h1></div>
+          </header>
+          <form id="settings-form" class="settings-card">
+            <div class="settings-section">
+              <h2>プロフィール</h2>
+              <label>表示名<input id="display-name-input" type="text" maxlength="40" required></label>
+              <label>ログインアカウント<input id="email-input" type="email" disabled></label>
+            </div>
+            <div class="settings-section">
+              <h2>表示</h2>
+              <label>テーマ
+                <select id="theme-input">
+                  <option value="system">端末の設定に合わせる</option>
+                  <option value="light">ライト</option>
+                  <option value="dark">ダーク</option>
+                </select>
+              </label>
+              <label>一度に表示する件数
+                <select id="page-size-input">
+                  <option value="10">10件</option>
+                  <option value="20">20件</option>
+                  <option value="30">30件</option>
+                  <option value="50">50件</option>
+                </select>
+              </label>
+            </div>
+            <button class="primary-button" type="submit">設定を保存</button>
+          </form>
+
+          <section class="settings-card export-card">
+            <div class="settings-section">
+              <h2>データを書き出す</h2>
+              <p>投稿と返信のバックアップを端末に保存します。ごみ箱のデータも含まれます。</p>
+              <div class="button-row">
+                <button class="secondary-button" type="button" data-export="json">JSONで保存</button>
+                <button class="secondary-button" type="button" data-export="csv">投稿をCSVで保存</button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+
+      <aside class="right-rail" aria-label="振り返り">
+        <section class="rail-card private-card">
+          <div class="private-icon" aria-hidden="true">⌾</div>
+          <div><strong>あなただけのタイムライン</strong><p>ここに書いた内容は外部SNSへ公開されません。</p></div>
+        </section>
+
+        <section class="rail-card discovery-section">
+          <div class="rail-heading"><h2>思考との再会</h2><button id="refresh-discovery" class="icon-button" type="button" aria-label="別の投稿を表示">↻</button></div>
+          <div id="discovery-list" class="discovery-list"></div>
+        </section>
+
+        <section class="rail-card prompt-card">
+          <p class="eyebrow">TODAY'S PROMPT</p>
+          <strong>今日いちばん小さかった違和感は？</strong>
+          <button id="use-prompt" class="text-button" type="button">この問いに答える</button>
+        </section>
+      </aside>
+    </div>
+
+    <nav class="mobile-nav" aria-label="モバイルメニュー">
+      <button class="active" type="button" data-view="timeline"><span aria-hidden="true">⌂</span><small>ホーム</small></button>
+      <button type="button" data-view="favorites"><span aria-hidden="true">♡</span><small>お気に入り</small></button>
+      <button id="mobile-compose-button" class="mobile-compose-button" type="button" aria-label="新しい投稿">＋</button>
+      <button type="button" data-view="trash"><span aria-hidden="true">♲</span><small>ごみ箱</small></button>
+      <button type="button" data-view="settings"><span aria-hidden="true">⚙</span><small>設定</small></button>
+    </nav>
+
+    <dialog id="thread-dialog" class="app-dialog thread-dialog">
+      <div class="dialog-header"><h2>スレッド</h2><button class="icon-button" type="button" data-close-dialog="thread-dialog" aria-label="閉じる">×</button></div>
+      <div id="thread-content" class="thread-content"></div>
+      <form id="reply-form" class="reply-form">
+        <label class="sr-only" for="reply-body">返信を入力</label>
+        <textarea id="reply-body" rows="2" maxlength="280" placeholder="考えをつなげる…" required></textarea>
+        <div class="reply-footer"><span id="reply-count" class="character-count">0 / 280</span><button class="primary-button" type="submit">返信する</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="edit-dialog" class="app-dialog edit-dialog">
+      <form id="edit-form">
+        <div class="dialog-header"><h2 id="edit-title">投稿を編集</h2><button class="icon-button" type="button" data-close-dialog="edit-dialog" aria-label="閉じる">×</button></div>
+        <label class="sr-only" for="edit-body">本文</label>
+        <textarea id="edit-body" rows="5" maxlength="280" required></textarea>
+        <label id="edit-tags-label" class="field-label" for="edit-tags">タグ<input id="edit-tags" type="text" placeholder="空白区切り"></label>
+        <div class="dialog-actions"><button class="secondary-button" type="button" data-close-dialog="edit-dialog">キャンセル</button><button class="primary-button" type="submit">変更を保存</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="confirm-dialog" class="app-dialog confirm-dialog">
+      <div class="confirm-icon" aria-hidden="true">!</div>
+      <h2 id="confirm-title">確認</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-actions"><button id="confirm-cancel" class="secondary-button" type="button">キャンセル</button><button id="confirm-ok" class="danger-button" type="button">削除する</button></div>
+    </dialog>
+
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div id="initial-loader" class="initial-loader" role="status"><span class="loader-mark">m</span><span>タイムラインを準備しています…</span></div>
+
+    <?!= include_('JavaScript'); ?>
+  </body>
+</html>

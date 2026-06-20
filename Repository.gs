@@ -1,0 +1,125 @@
+function getSpreadsheet_() {
+  const id = PropertiesService.getScriptProperties().getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
+  if (!id) {
+    throw new Error('保存先が設定されていません。setupMySNS を実行してください。');
+  }
+  return SpreadsheetApp.openById(id);
+}
+
+function ensureSchema_(spreadsheet) {
+  Object.keys(CONFIG_.SHEETS).forEach(function (key) {
+    const definition = CONFIG_.SHEETS[key];
+    let sheet = spreadsheet.getSheetByName(definition.name);
+    if (!sheet) sheet = spreadsheet.insertSheet(definition.name);
+
+    const headers = definition.headers.slice();
+    const currentHeaders = sheet.getLastColumn() > 0
+      ? sheet.getRange(1, 1, 1, Math.max(sheet.getLastColumn(), headers.length)).getValues()[0]
+      : [];
+
+    headers.forEach(function (header, index) {
+      if (currentHeaders[index] && currentHeaders[index] !== header) {
+        throw new Error(definition.name + ' シートの列構成が想定と異なります。');
+      }
+    });
+
+    if (sheet.getLastRow() === 0 || !currentHeaders[0]) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    }
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#e8f3ff');
+  });
+
+  const defaultSheet = spreadsheet.getSheetByName('シート1') || spreadsheet.getSheetByName('Sheet1');
+  if (defaultSheet && spreadsheet.getSheets().length > 3 && defaultSheet.getLastRow() === 0) {
+    spreadsheet.deleteSheet(defaultSheet);
+  }
+}
+
+function getSheet_(sheetName) {
+  const spreadsheet = getSpreadsheet_();
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) {
+    ensureSchema_(spreadsheet);
+    return spreadsheet.getSheetByName(sheetName);
+  }
+  return sheet;
+}
+
+function readRecords_(definition) {
+  const sheet = getSheet_(definition.name);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  const headers = definition.headers.slice();
+  const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  return values.map(function (row, rowIndex) {
+    const record = { _row: rowIndex + 2 };
+    headers.forEach(function (header, columnIndex) {
+      const value = row[columnIndex];
+      record[header] = value instanceof Date ? value.toISOString() : value;
+    });
+    return record;
+  });
+}
+
+function appendRecord_(definition, record) {
+  const sheet = getSheet_(definition.name);
+  const row = definition.headers.map(function (header) {
+    return record[header] == null ? '' : record[header];
+  });
+  sheet.appendRow(row);
+  return record;
+}
+
+function findRecordById_(definition, id) {
+  const record = readRecords_(definition).find(function (item) {
+    return String(item.id) === String(id);
+  });
+  if (!record) throw new Error('対象のデータが見つかりません。');
+  return record;
+}
+
+function patchRecord_(definition, rowNumber, patch) {
+  const sheet = getSheet_(definition.name);
+  const headers = definition.headers;
+  Object.keys(patch).forEach(function (key) {
+    const column = headers.indexOf(key);
+    if (column >= 0) sheet.getRange(rowNumber, column + 1).setValue(patch[key]);
+  });
+}
+
+function deleteRecordRow_(definition, rowNumber) {
+  getSheet_(definition.name).deleteRow(rowNumber);
+}
+
+function readSettings_() {
+  const records = readRecords_(CONFIG_.SHEETS.SETTINGS);
+  return records.reduce(function (result, record) {
+    result[String(record.key)] = String(record.value == null ? '' : record.value);
+    return result;
+  }, {});
+}
+
+function writeSetting_(key, value) {
+  const definition = CONFIG_.SHEETS.SETTINGS;
+  const existing = readRecords_(definition).find(function (record) {
+    return String(record.key) === key;
+  });
+  const timestamp = nowIso_();
+
+  if (existing) {
+    patchRecord_(definition, existing._row, { value: String(value), updatedAt: timestamp });
+  } else {
+    appendRecord_(definition, { key: key, value: String(value), updatedAt: timestamp });
+  }
+}
+
+function ensureDefaultSettings_(email) {
+  const settings = readSettings_();
+  if (!settings.displayName) writeSetting_('displayName', email.split('@')[0]);
+  if (!settings.theme) writeSetting_('theme', 'system');
+  if (!settings.pageSize) writeSetting_('pageSize', String(CONFIG_.DEFAULT_PAGE_SIZE));
+}

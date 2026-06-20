@@ -1,0 +1,791 @@
+<script>
+  'use strict';
+
+  (() => {
+
+  const state = {
+    settings: null,
+    posts: [],
+    tags: [],
+    filters: {
+      query: '',
+      tag: '',
+      startDate: '',
+      endDate: '',
+      replyState: '',
+      favoriteOnly: false,
+      offset: 0
+    },
+    hasMore: false,
+    total: 0,
+    currentView: 'timeline',
+    selectedTags: new Set(),
+    thread: null,
+    editTarget: null,
+    confirmResolver: null,
+    loadingTimeline: false
+  };
+
+  const queryOne = (selector, root = document) => root.querySelector(selector);
+  const queryAll = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+  document.addEventListener('DOMContentLoaded', initialize);
+
+  async function initialize() {
+    bindEvents();
+    renderSkeletons();
+    try {
+      const data = await callApi('apiBootstrap', state.filters);
+      state.settings = data.settings;
+      state.posts = data.timeline.posts;
+      state.tags = data.timeline.tags;
+      state.hasMore = data.timeline.hasMore;
+      state.total = data.timeline.total;
+      state.filters.offset = data.timeline.nextOffset;
+      applySettings();
+      renderTimeline();
+      renderTagFilters();
+      renderDiscovery(data.discovery);
+      document.querySelector('#app').setAttribute('aria-busy', 'false');
+    } catch (error) {
+      renderFatalError(error);
+    } finally {
+      queryOne('#initial-loader').classList.add('hidden');
+    }
+  }
+
+  function bindEvents() {
+    queryOne('#post-form').addEventListener('submit', createPost);
+    queryOne('#post-body').addEventListener('input', () => updateCount('#post-body', '#post-count'));
+    queryOne('#post-tags').addEventListener('input', syncQuickTagsFromInput);
+    queryOne('#quick-tags').addEventListener('click', toggleQuickTag);
+
+    queryOne('#filter-form').addEventListener('submit', applyFilters);
+    queryOne('#filter-toggle').addEventListener('click', toggleAdvancedFilters);
+    queryOne('#clear-filters').addEventListener('click', clearFilters);
+    queryOne('#tag-filter-list').addEventListener('click', filterByTag);
+    queryOne('#load-more').addEventListener('click', () => loadTimeline(true));
+
+    queryAll('[data-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
+    queryOne('#side-compose-button').addEventListener('click', focusComposer);
+    queryOne('#mobile-compose-button').addEventListener('click', focusComposer);
+    queryOne('#mobile-theme-button').addEventListener('click', toggleTheme);
+
+    queryOne('#timeline').addEventListener('click', handleTimelineAction);
+    queryOne('#trash-list').addEventListener('click', handleTrashAction);
+    queryOne('#discovery-list').addEventListener('click', handleDiscoveryAction);
+    queryOne('#refresh-discovery').addEventListener('click', refreshDiscovery);
+    queryOne('#use-prompt').addEventListener('click', useDailyPrompt);
+
+    queryOne('#reply-form').addEventListener('submit', createReply);
+    queryOne('#reply-body').addEventListener('input', () => updateCount('#reply-body', '#reply-count'));
+    queryOne('#thread-content').addEventListener('click', handleThreadAction);
+    queryOne('#edit-form').addEventListener('submit', saveEdit);
+    queryAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => closeDialog(button.dataset.closeDialog)));
+
+    queryOne('#settings-form').addEventListener('submit', saveSettings);
+    queryAll('[data-export]').forEach(button => button.addEventListener('click', () => exportData(button.dataset.export, button)));
+
+    queryOne('#confirm-cancel').addEventListener('click', () => resolveConfirmation(false));
+    queryOne('#confirm-ok').addEventListener('click', () => resolveConfirmation(true));
+    queryOne('#confirm-dialog').addEventListener('cancel', event => {
+      event.preventDefault();
+      resolveConfirmation(false);
+    });
+
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.post-menu')) {
+        queryAll('.post-menu[open]').forEach(menu => menu.removeAttribute('open'));
+      }
+    });
+  }
+
+  function callApi(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      if (!window.google || !google.script || !google.script.run) {
+        reject(new Error('Apps Script の実行環境に接続できません。'));
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result && result.ok) resolve(result.data);
+          else reject(new Error(result && result.error || '処理に失敗しました。'));
+        })
+        .withFailureHandler(error => reject(new Error(error && error.message || 'サーバーとの通信に失敗しました。')))
+        [functionName](...args);
+    });
+  }
+
+  function applySettings() {
+    const name = state.settings.displayName;
+    queryAll('[data-display-name]').forEach(element => { element.textContent = name; });
+    queryAll('[data-avatar]').forEach(element => { element.textContent = initials(name); });
+    queryOne('#display-name-input').value = name;
+    queryOne('#email-input').value = state.settings.email;
+    queryOne('#theme-input').value = state.settings.theme;
+    queryOne('#page-size-input').value = String(state.settings.pageSize);
+    applyTheme(state.settings.theme);
+    queryOne('#post-body').maxLength = state.settings.maxPostLength;
+    queryOne('#reply-body').maxLength = state.settings.maxReplyLength;
+    updateCount('#post-body', '#post-count');
+    updateCount('#reply-body', '#reply-count');
+  }
+
+  function applyTheme(theme) {
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }
+
+  function toggleTheme() {
+    const darkNow = getComputedStyle(document.documentElement).colorScheme === 'dark';
+    const next = darkNow ? 'light' : 'dark';
+    state.settings.theme = next;
+    queryOne('#theme-input').value = next;
+    applyTheme(next);
+    showToast('表示テーマを切り替えました。設定画面で保存できます。');
+  }
+
+  function initials(name) {
+    const value = String(name || 'me').trim();
+    if (!value) return 'me';
+    const parts = value.split(/\s+/).filter(Boolean);
+    return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : value.slice(0, 2)).toUpperCase();
+  }
+
+  async function createPost(event) {
+    event.preventDefault();
+    const submit = queryOne('#post-submit');
+    const body = queryOne('#post-body').value;
+    const tags = parseTagInput(queryOne('#post-tags').value);
+    setButtonBusy(submit, true, '投稿中…');
+    try {
+      const post = await callApi('apiCreatePost', { body, tags });
+      state.posts.unshift(post);
+      state.total += 1;
+      queryOne('#post-form').reset();
+      state.selectedTags.clear();
+      queryAll('.tag-toggle.selected').forEach(button => button.classList.remove('selected'));
+      updateCount('#post-body', '#post-count');
+      await loadTimeline(false);
+      showToast('つぶやきを残しました。');
+      queryOne('#post-body').focus();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+  function toggleQuickTag(event) {
+    const button = event.target.closest('[data-quick-tag]');
+    if (!button) return;
+    const tag = button.dataset.quickTag;
+    if (state.selectedTags.has(tag)) state.selectedTags.delete(tag);
+    else if (state.selectedTags.size < (state.settings ? state.settings.maxTags : 5)) state.selectedTags.add(tag);
+    else return showToast('タグは5個まで指定できます。', true);
+    button.classList.toggle('selected', state.selectedTags.has(tag));
+    queryOne('#post-tags').value = Array.from(state.selectedTags).map(item => '#' + item).join(' ');
+  }
+
+  function syncQuickTagsFromInput() {
+    state.selectedTags = new Set(parseTagInput(queryOne('#post-tags').value));
+    queryAll('.tag-toggle').forEach(button => button.classList.toggle('selected', state.selectedTags.has(button.dataset.quickTag)));
+  }
+
+  function parseTagInput(value) {
+    const seen = new Set();
+    return String(value || '')
+      .split(/[\s,、]+/)
+      .map(item => item.replace(/^#+/, '').trim())
+      .filter(item => {
+        const key = item.toLocaleLowerCase();
+        if (!item || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  async function applyFilters(event) {
+    event.preventDefault();
+    readFilterControls();
+    await loadTimeline(false);
+  }
+
+  function readFilterControls() {
+    state.filters.query = queryOne('#search-input').value.trim();
+    state.filters.startDate = queryOne('#start-date').value;
+    state.filters.endDate = queryOne('#end-date').value;
+    state.filters.replyState = queryOne('#reply-state').value;
+    state.filters.offset = 0;
+  }
+
+  function toggleAdvancedFilters() {
+    const panel = queryOne('#advanced-filters');
+    panel.hidden = !panel.hidden;
+    queryOne('#filter-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+  }
+
+  async function clearFilters() {
+    queryOne('#filter-form').reset();
+    queryOne('#start-date').value = '';
+    queryOne('#end-date').value = '';
+    queryOne('#reply-state').value = '';
+    state.filters = { query: '', tag: '', startDate: '', endDate: '', replyState: '', favoriteOnly: state.currentView === 'favorites', offset: 0 };
+    await loadTimeline(false);
+  }
+
+  async function filterByTag(event) {
+    const button = event.target.closest('[data-filter-tag]');
+    if (!button) return;
+    state.filters.tag = state.filters.tag === button.dataset.filterTag ? '' : button.dataset.filterTag;
+    state.filters.offset = 0;
+    await loadTimeline(false);
+  }
+
+  async function loadTimeline(append) {
+    if (state.loadingTimeline) return;
+    state.loadingTimeline = true;
+    const loadMore = queryOne('#load-more');
+    setButtonBusy(loadMore, true, '読み込み中…');
+    if (!append) {
+      state.filters.offset = 0;
+      renderSkeletons();
+    }
+    try {
+      const data = await callApi('apiTimeline', state.filters);
+      state.posts = append ? state.posts.concat(data.posts) : data.posts;
+      state.tags = data.tags;
+      state.total = data.total;
+      state.hasMore = data.hasMore;
+      state.filters.offset = data.nextOffset;
+      renderTimeline();
+      renderTagFilters();
+    } catch (error) {
+      showToast(error.message, true);
+      if (!append) renderEmptyState('読み込めませんでした', 'しばらく待ってから、もう一度お試しください。');
+    } finally {
+      state.loadingTimeline = false;
+      setButtonBusy(loadMore, false);
+    }
+  }
+
+  function renderTimeline() {
+    const timeline = queryOne('#timeline');
+    if (!state.posts.length) {
+      const filtered = Boolean(state.filters.query || state.filters.tag || state.filters.startDate || state.filters.endDate || state.filters.replyState || state.filters.favoriteOnly);
+      timeline.innerHTML = emptyStateHtml(
+        filtered ? '条件に合う投稿がありません' : '最初のひとことを残してみましょう',
+        filtered ? '検索条件を変えると、別の思考が見つかるかもしれません。' : '大きな気づきでなくても大丈夫。今日の小さな感触から始められます。'
+      );
+    } else {
+      timeline.innerHTML = state.posts.map(post => postHtml(post)).join('');
+    }
+    queryOne('#timeline-status').textContent = state.total ? `${state.total}件の投稿` : '';
+    queryOne('#load-more').hidden = !state.hasMore;
+    renderFilterSummary();
+  }
+
+  function postHtml(post, options = {}) {
+    const deleted = Boolean(post.deletedAt);
+    const edited = post.updatedAt && post.updatedAt !== post.createdAt;
+    return `
+      <article class="post-card ${options.threadRoot ? 'thread-root' : ''}" data-post-id="${escapeAttr(post.id)}">
+        <span class="avatar">${escapeHtml(initials(state.settings && state.settings.displayName))}</span>
+        <div class="post-main">
+          <div class="post-meta">
+            <strong>${escapeHtml(state.settings && state.settings.displayName || 'me')}</strong>
+            <span class="post-handle">@private</span>
+            <time class="post-time" datetime="${escapeAttr(post.createdAt)}" title="${escapeAttr(formatExactDate(post.createdAt))}">${escapeHtml(formatRelativeDate(post.createdAt))}</time>
+            ${edited ? '<span class="edited-label">編集済み</span>' : ''}
+          </div>
+          <p class="post-body">${formatBody(post.body)}</p>
+          ${post.tags && post.tags.length ? `<div class="post-tags">${post.tags.map(tag => `<button type="button" data-filter-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</button>`).join('')}</div>` : ''}
+          ${deleted ? `
+            <div class="trash-actions">
+              <button class="secondary-button" type="button" data-action="restore" data-id="${escapeAttr(post.id)}">復元する</button>
+              <button class="danger-button" type="button" data-action="purge" data-id="${escapeAttr(post.id)}">完全に削除</button>
+            </div>
+          ` : `
+            <div class="post-actions">
+              <button class="post-action" type="button" data-action="reply" data-id="${escapeAttr(post.id)}" aria-label="返信">
+                <span aria-hidden="true">↩</span><span>${Number(post.replyCount) || ''}</span>
+              </button>
+              <button class="post-action favorite ${post.favorite ? 'active' : ''}" type="button" data-action="favorite" data-id="${escapeAttr(post.id)}" aria-label="お気に入り${post.favorite ? 'を解除' : 'に追加'}">
+                <span aria-hidden="true">${post.favorite ? '♥' : '♡'}</span>
+              </button>
+              <button class="post-action" type="button" data-action="edit-post" data-id="${escapeAttr(post.id)}" aria-label="編集"><span aria-hidden="true">✎</span></button>
+              <button class="post-action delete" type="button" data-action="delete-post" data-id="${escapeAttr(post.id)}" aria-label="削除"><span aria-hidden="true">⌫</span></button>
+            </div>
+          `}
+        </div>
+      </article>`;
+  }
+
+  function renderTagFilters() {
+    queryOne('#tag-filter-list').innerHTML = state.tags.slice(0, 20).map(tag => `
+      <button type="button" class="tag-pill ${state.filters.tag === tag.name ? 'active' : ''}" data-filter-tag="${escapeAttr(tag.name)}">
+        #${escapeHtml(tag.name)} <span>${tag.count}</span>
+      </button>`).join('');
+  }
+
+  function renderFilterSummary() {
+    const labels = [];
+    if (state.filters.query) labels.push(`「${state.filters.query}」`);
+    if (state.filters.tag) labels.push(`#${state.filters.tag}`);
+    if (state.filters.startDate || state.filters.endDate) labels.push(`${state.filters.startDate || '指定なし'}〜${state.filters.endDate || '指定なし'}`);
+    if (state.filters.replyState) labels.push(state.filters.replyState === 'with' ? '返信あり' : '返信なし');
+    if (state.filters.favoriteOnly) labels.push('お気に入り');
+    queryOne('#active-filter-summary').textContent = labels.length ? `絞り込み中：${labels.join('・')}` : '';
+  }
+
+  async function handleTimelineAction(event) {
+    const tag = event.target.closest('[data-filter-tag]');
+    if (tag) return filterByTag({ target: tag });
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    const id = button.dataset.id;
+    const action = button.dataset.action;
+    if (action === 'favorite') return toggleFavorite(id, button);
+    if (action === 'reply') return openThread(id);
+    if (action === 'edit-post') return openPostEditor(id);
+    if (action === 'delete-post') return deletePost(id);
+  }
+
+  async function toggleFavorite(id, button) {
+    button.disabled = true;
+    try {
+      const result = await callApi('apiToggleFavorite', id);
+      const post = state.posts.find(item => item.id === id);
+      if (post) post.favorite = result.favorite;
+      if (state.currentView === 'favorites' && !result.favorite) {
+        await loadTimeline(false);
+      } else {
+        renderTimeline();
+      }
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function openThread(id) {
+    const dialog = queryOne('#thread-dialog');
+    queryOne('#thread-content').innerHTML = skeletonHtml(2);
+    queryOne('#reply-form').reset();
+    updateCount('#reply-body', '#reply-count');
+    dialog.showModal();
+    try {
+      state.thread = await callApi('apiThread', id);
+      renderThread();
+      queryOne('#reply-body').focus();
+    } catch (error) {
+      closeDialog('thread-dialog');
+      showToast(error.message, true);
+    }
+  }
+
+  function renderThread() {
+    if (!state.thread) return;
+    const replies = state.thread.replies.map(reply => `
+      <article class="reply-card" data-reply-id="${escapeAttr(reply.id)}">
+        <span class="avatar">${escapeHtml(initials(state.settings.displayName))}</span>
+        <div class="reply-body">
+          <div class="post-meta"><strong>${escapeHtml(state.settings.displayName)}</strong><time class="post-time" datetime="${escapeAttr(reply.createdAt)}" title="${escapeAttr(formatExactDate(reply.createdAt))}">${escapeHtml(formatRelativeDate(reply.createdAt))}</time>${reply.updatedAt !== reply.createdAt ? '<span class="edited-label">編集済み</span>' : ''}</div>
+          <p>${formatBody(reply.body)}</p>
+          <div class="reply-actions"><button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button></div>
+        </div>
+      </article>`).join('');
+    queryOne('#thread-content').innerHTML = postHtml(state.thread.post, { threadRoot: true }) + (replies || '<div class="empty-state"><p>まだ返信はありません。今の考えをつなげてみましょう。</p></div>');
+    const content = queryOne('#thread-content');
+    content.scrollTop = content.scrollHeight;
+  }
+
+  async function createReply(event) {
+    event.preventDefault();
+    if (!state.thread) return;
+    const submit = event.submitter || queryOne('#reply-form button[type="submit"]');
+    setButtonBusy(submit, true, '返信中…');
+    try {
+      const reply = await callApi('apiCreateReply', state.thread.post.id, { body: queryOne('#reply-body').value });
+      state.thread.replies.push(reply);
+      state.thread.post.replyCount = state.thread.replies.length;
+      queryOne('#reply-form').reset();
+      updateCount('#reply-body', '#reply-count');
+      renderThread();
+      const post = state.posts.find(item => item.id === state.thread.post.id);
+      if (post) post.replyCount = state.thread.replies.length;
+      showToast('考えをスレッドにつなげました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+  function handleThreadAction(event) {
+    const tag = event.target.closest('[data-filter-tag]');
+    if (tag) {
+      closeDialog('thread-dialog');
+      switchView('timeline').then(() => filterByTag({ target: tag }));
+      return;
+    }
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    if (button.dataset.action === 'favorite') return toggleThreadFavorite(button.dataset.id);
+    if (button.dataset.action === 'edit-post') return openPostEditor(button.dataset.id);
+    if (button.dataset.action === 'delete-post') return deletePost(button.dataset.id, true);
+    if (button.dataset.action === 'edit-reply') return openReplyEditor(button.dataset.id);
+    if (button.dataset.action === 'delete-reply') return deleteReply(button.dataset.id);
+  }
+
+  async function toggleThreadFavorite(id) {
+    try {
+      const result = await callApi('apiToggleFavorite', id);
+      state.thread.post.favorite = result.favorite;
+      const post = state.posts.find(item => item.id === id);
+      if (post) post.favorite = result.favorite;
+      renderThread();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+  function openPostEditor(id) {
+    const post = (state.thread && state.thread.post.id === id ? state.thread.post : null) || state.posts.find(item => item.id === id);
+    if (!post) return showToast('投稿を見つけられませんでした。', true);
+    state.editTarget = { type: 'post', id: id };
+    queryOne('#edit-title').textContent = '投稿を編集';
+    queryOne('#edit-body').value = post.body;
+    queryOne('#edit-tags').value = (post.tags || []).map(tag => '#' + tag).join(' ');
+    queryOne('#edit-tags-label').hidden = false;
+    queryOne('#edit-dialog').showModal();
+    queryOne('#edit-body').focus();
+  }
+
+  function openReplyEditor(id) {
+    const reply = state.thread && state.thread.replies.find(item => item.id === id);
+    if (!reply) return showToast('返信を見つけられませんでした。', true);
+    state.editTarget = { type: 'reply', id: id };
+    queryOne('#edit-title').textContent = '返信を編集';
+    queryOne('#edit-body').value = reply.body;
+    queryOne('#edit-tags').value = '';
+    queryOne('#edit-tags-label').hidden = true;
+    queryOne('#edit-dialog').showModal();
+    queryOne('#edit-body').focus();
+  }
+
+  async function saveEdit(event) {
+    event.preventDefault();
+    if (!state.editTarget) return;
+    const submit = event.submitter || queryOne('#edit-form button[type="submit"]');
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      if (state.editTarget.type === 'post') {
+        const updated = await callApi('apiUpdatePost', state.editTarget.id, {
+          body: queryOne('#edit-body').value,
+          tags: parseTagInput(queryOne('#edit-tags').value)
+        });
+        const index = state.posts.findIndex(item => item.id === updated.id);
+        if (index >= 0) state.posts[index] = updated;
+        if (state.thread && state.thread.post.id === updated.id) state.thread.post = updated;
+      } else {
+        const updated = await callApi('apiUpdateReply', state.editTarget.id, { body: queryOne('#edit-body').value });
+        const index = state.thread.replies.findIndex(item => item.id === updated.id);
+        if (index >= 0) state.thread.replies[index] = updated;
+      }
+      closeDialog('edit-dialog');
+      renderTimeline();
+      if (state.thread) renderThread();
+      showToast('変更を保存しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+  async function deletePost(id, fromThread = false) {
+    const confirmed = await confirmAction('投稿を削除しますか？', '投稿と返信をごみ箱へ移動します。あとで復元できます。', 'ごみ箱へ移動');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeletePost', id);
+      if (fromThread || (queryOne('#thread-dialog').open && state.thread && state.thread.post.id === id)) closeDialog('thread-dialog');
+      state.thread = null;
+      await loadTimeline(false);
+      showToast('投稿をごみ箱へ移動しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+  async function deleteReply(id) {
+    const confirmed = await confirmAction('返信を削除しますか？', 'この操作は投稿のごみ箱には表示されません。', '削除する');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeleteReply', id);
+      state.thread.replies = state.thread.replies.filter(item => item.id !== id);
+      state.thread.post.replyCount = state.thread.replies.length;
+      renderThread();
+      const post = state.posts.find(item => item.id === state.thread.post.id);
+      if (post) post.replyCount = state.thread.replies.length;
+      showToast('返信を削除しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+  async function switchView(view) {
+    state.currentView = view;
+    queryAll('[data-view]').forEach(button => {
+      const active = button.dataset.view === view;
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+
+    const timelineVisible = view === 'timeline' || view === 'favorites';
+    queryOne('#timeline-view').hidden = !timelineVisible;
+    queryOne('#timeline-view').classList.toggle('active', timelineVisible);
+    queryOne('#trash-view').hidden = view !== 'trash';
+    queryOne('#settings-view').hidden = view !== 'settings';
+
+    if (timelineVisible) {
+      queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : 'ホーム';
+      state.filters.favoriteOnly = view === 'favorites';
+      state.filters.offset = 0;
+      await loadTimeline(false);
+    } else if (view === 'trash') {
+      await loadTrash();
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function loadTrash() {
+    queryOne('#trash-list').innerHTML = skeletonHtml(2);
+    try {
+      const data = await callApi('apiTrash');
+      queryOne('#trash-list').innerHTML = data.posts.length
+        ? data.posts.map(post => postHtml(post)).join('')
+        : emptyStateHtml('ごみ箱は空です', '削除した投稿がここに表示されます。');
+    } catch (error) {
+      showToast(error.message, true);
+      renderEmptyState('ごみ箱を読み込めませんでした', error.message, '#trash-list');
+    }
+  }
+
+  async function handleTrashAction(event) {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    if (button.dataset.action === 'restore') {
+      try {
+        await callApi('apiRestorePost', button.dataset.id);
+        await loadTrash();
+        showToast('投稿をタイムラインへ戻しました。');
+      } catch (error) { showToast(error.message, true); }
+    }
+    if (button.dataset.action === 'purge') {
+      const confirmed = await confirmAction('完全に削除しますか？', '投稿と返信は復元できなくなります。', '完全に削除');
+      if (!confirmed) return;
+      try {
+        await callApi('apiPermanentlyDeletePost', button.dataset.id);
+        await loadTrash();
+        showToast('投稿を完全に削除しました。');
+      } catch (error) { showToast(error.message, true); }
+    }
+  }
+
+  function renderDiscovery(discovery) {
+    const items = [
+      ['onThisDay', '過去の今日'],
+      ['unanswered', 'まだ続きを待っている思考'],
+      ['random', 'ランダムな再会']
+    ];
+    const html = items
+      .filter(([key]) => discovery && discovery[key])
+      .map(([key, label]) => {
+        const post = discovery[key];
+        return `<button class="discovery-item" type="button" data-post-id="${escapeAttr(post.id)}"><span class="discovery-label">${escapeHtml(label)}</span><span class="discovery-body">${escapeHtml(post.body)}</span></button>`;
+      }).join('');
+    queryOne('#discovery-list').innerHTML = html || '<div class="discovery-empty">投稿が増えると、ここで昔の思考と再会できます。</div>';
+  }
+
+  async function refreshDiscovery() {
+    const button = queryOne('#refresh-discovery');
+    button.disabled = true;
+    try { renderDiscovery(await callApi('apiDiscovery')); }
+    catch (error) { showToast(error.message, true); }
+    finally { button.disabled = false; }
+  }
+
+  function handleDiscoveryAction(event) {
+    const button = event.target.closest('[data-post-id]');
+    if (button) openThread(button.dataset.postId);
+  }
+
+  function useDailyPrompt() {
+    focusComposer();
+    queryOne('#post-body').value = '今日いちばん小さかった違和感は、';
+    updateCount('#post-body', '#post-count');
+    queryOne('#post-body').focus();
+    queryOne('#post-body').setSelectionRange(queryOne('#post-body').value.length, queryOne('#post-body').value.length);
+  }
+
+  function focusComposer() {
+    if (state.currentView !== 'timeline') switchView('timeline').then(focusComposer);
+    else {
+      queryOne('#composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => queryOne('#post-body').focus(), 250);
+    }
+  }
+
+  async function saveSettings(event) {
+    event.preventDefault();
+    const submit = event.submitter || queryOne('#settings-form button[type="submit"]');
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      state.settings = await callApi('apiSaveSettings', {
+        displayName: queryOne('#display-name-input').value,
+        theme: queryOne('#theme-input').value,
+        pageSize: Number(queryOne('#page-size-input').value)
+      });
+      applySettings();
+      showToast('設定を保存しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+  async function exportData(format, button) {
+    setButtonBusy(button, true, '準備中…');
+    try {
+      const data = await callApi('apiExport', format);
+      const blob = new Blob([data.content], { type: data.mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = data.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showToast('バックアップを書き出しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+    }
+  }
+
+  function confirmAction(title, message, buttonLabel) {
+    queryOne('#confirm-title').textContent = title;
+    queryOne('#confirm-message').textContent = message;
+    queryOne('#confirm-ok').textContent = buttonLabel;
+    queryOne('#confirm-dialog').showModal();
+    return new Promise(resolve => { state.confirmResolver = resolve; });
+  }
+
+  function resolveConfirmation(value) {
+    closeDialog('confirm-dialog');
+    if (state.confirmResolver) state.confirmResolver(value);
+    state.confirmResolver = null;
+  }
+
+  function closeDialog(id) {
+    const dialog = queryOne('#' + id);
+    if (dialog && dialog.open) dialog.close();
+  }
+
+  function setButtonBusy(button, busy, busyLabel) {
+    if (!button) return;
+    if (busy) {
+      button.dataset.originalLabel = button.textContent;
+      button.textContent = busyLabel;
+      button.disabled = true;
+    } else {
+      if (button.dataset.originalLabel) button.textContent = button.dataset.originalLabel;
+      delete button.dataset.originalLabel;
+      button.disabled = false;
+    }
+  }
+
+  function updateCount(inputSelector, countSelector) {
+    const input = queryOne(inputSelector);
+    const count = queryOne(countSelector);
+    const max = Number(input.maxLength) > 0 ? Number(input.maxLength) : 280;
+    const length = Array.from(input.value).length;
+    count.textContent = `${length} / ${max}`;
+    count.classList.toggle('near-limit', length >= max * .8 && length < max);
+    count.classList.toggle('at-limit', length >= max);
+  }
+
+  function renderSkeletons() {
+    queryOne('#timeline').innerHTML = skeletonHtml(3);
+    queryOne('#timeline-status').textContent = '読み込み中…';
+  }
+
+  function skeletonHtml(count) {
+    return Array.from({ length: count }, () => '<div class="skeleton-card" aria-hidden="true"><span class="skeleton skeleton-avatar"></span><div class="skeleton-lines"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div></div>').join('');
+  }
+
+  function emptyStateHtml(title, message) {
+    return `<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">◌</span><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>`;
+  }
+
+  function renderEmptyState(title, message, selector = '#timeline') {
+    queryOne(selector).innerHTML = emptyStateHtml(title, message);
+  }
+
+  function renderFatalError(error) {
+    state.posts = [];
+    queryOne('#timeline').innerHTML = emptyStateHtml('mySNSを開けませんでした', error.message);
+    queryOne('#timeline-status').textContent = '';
+    showToast(error.message, true);
+  }
+
+  function showToast(message, isError = false) {
+    const toast = document.createElement('div');
+    toast.className = 'toast' + (isError ? ' error' : '');
+    toast.textContent = message;
+    queryOne('#toast-region').appendChild(toast);
+    setTimeout(() => toast.remove(), 4200);
+  }
+
+  function formatBody(value) {
+    return escapeHtml(String(value || '')).replace(/\n/g, '<br>');
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, '&#096;');
+  }
+
+  function formatRelativeDate(value) {
+    const date = new Date(value);
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (!Number.isFinite(seconds)) return '';
+    if (seconds < 30) return 'いま';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}時間`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}日`;
+    return new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric' }).format(date);
+  }
+
+  function formatExactDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('ja-JP', { dateStyle: 'long', timeStyle: 'short' }).format(date);
+  }
+  })();
+</script>
