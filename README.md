@@ -19,6 +19,13 @@
 
 外部API、CDN、アクセス解析、生成AIは使用していません。投稿本文をアプリのログへ出力する処理もありません。
 
+## 導入済み環境
+
+- [mySNSウェブアプリ](https://script.google.com/macros/s/AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4gLFz3vs3Zl_rHDS0bSPOLm-3sukeAmurPJw/exec)
+- [Apps Scriptプロジェクト](https://script.google.com/d/1uB3yERLAOsqqWxrumc8xdT7RnucxyAWPtZ3QC3XSX2nFJ_keevE9UVf0/edit)
+
+ローカルの `.clasp.json` にGASプロジェクトとの紐付けを保存しています。スクリプトIDをGitHubへ固定しない方針のため、このファイルはGit管理対象外です。
+
 ## 構成
 
 ```text
@@ -91,6 +98,12 @@ Apps Scriptで「デプロイ」→「新しいデプロイ」→「ウェブア
 npm.cmd run check
 npm.cmd test
 npx @google/clasp push
+```
+
+ウェブアプリへ反映する場合は、push後に既存デプロイを更新します。
+
+```powershell
+npx @google/clasp deploy --deploymentId AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4gLFz3vs3Zl_rHDS0bSPOLm-3sukeAmurPJw --description "変更内容"
 ```
 
 既存のスプレッドシートIDと利用許可アカウントはScript Propertiesに残るため、通常のコード更新で再設定は不要です。

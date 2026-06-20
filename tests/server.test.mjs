@@ -105,7 +105,6 @@ function createContext() {
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     HtmlService: {
-      XFrameOptionsMode: { SAMEORIGIN: 'SAMEORIGIN' },
       createTemplateFromFile: () => ({ evaluate: () => ({ setTitle() { return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } }) }),
       createHtmlOutputFromFile: () => ({ getContent: () => '' })
     }
