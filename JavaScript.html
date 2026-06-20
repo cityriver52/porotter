@@ -585,15 +585,26 @@
 
   function renderThread() {
     if (!state.thread) return;
-    const replies = state.thread.replies.map(reply => `
-      <article class="reply-card" data-reply-id="${escapeAttr(reply.id)}">
-        <span class="avatar">${escapeHtml(initials(state.settings.displayName))}</span>
-        <div class="reply-body">
-          <div class="post-meta"><strong>${escapeHtml(state.settings.displayName)}</strong><time class="post-time" datetime="${escapeAttr(reply.createdAt)}" title="${escapeAttr(formatExactDate(reply.createdAt))}">${escapeHtml(formatRelativeDate(reply.createdAt))}</time>${reply.updatedAt !== reply.createdAt ? '<span class="edited-label">編集済み</span>' : ''}</div>
-          <p>${formatBody(reply.body)}</p>
-          <div class="reply-actions"><button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button></div>
-        </div>
-      </article>`).join('');
+    const replies = state.thread.replies.map(reply => {
+      const isPersona = reply.authorType === 'persona';
+      const authorName = isPersona ? (reply.authorName || 'AIアカウント') : state.settings.displayName;
+      const parent = reply.parentReplyId
+        ? state.thread.replies.find(item => item.id === reply.parentReplyId)
+        : null;
+      const parentName = parent
+        ? (parent.authorType === 'persona' ? (parent.authorName || 'AIアカウント') : state.settings.displayName)
+        : '';
+      return `
+        <article class="reply-card ${reply.parentReplyId ? 'nested-reply' : ''}" data-reply-id="${escapeAttr(reply.id)}">
+          <span class="avatar ${isPersona ? 'ai' : ''}">${escapeHtml(initials(authorName))}</span>
+          <div class="reply-body">
+            <div class="post-meta"><strong>${escapeHtml(authorName)}</strong>${isPersona ? '<span class="ai-badge">AI</span>' : ''}<time class="post-time" datetime="${escapeAttr(reply.createdAt)}" title="${escapeAttr(formatExactDate(reply.createdAt))}">${escapeHtml(formatRelativeDate(reply.createdAt))}</time>${reply.updatedAt !== reply.createdAt ? '<span class="edited-label">編集済み</span>' : ''}</div>
+            ${parentName ? `<div class="replying-to">${escapeHtml(parentName)}への返信</div>` : ''}
+            <p>${formatBody(reply.body)}</p>
+            ${isPersona ? '' : `<div class="reply-actions"><button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button></div>`}
+          </div>
+        </article>`;
+    }).join('');
     queryOne('#thread-content').innerHTML = postHtml(state.thread.post, { threadRoot: true }) + (replies || '<div class="empty-state"><p>まだ返信はありません。今の考えをつなげてみましょう。</p></div>');
     const content = queryOne('#thread-content');
     content.scrollTop = content.scrollHeight;

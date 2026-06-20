@@ -237,9 +237,12 @@
   .thread-content { max-height: 52vh; overflow-y: auto; }
   .thread-root { border-left: 3px solid var(--accent); }
   .reply-card { position: relative; display: flex; gap: 12px; padding: 14px 20px 14px 28px; border-top: 1px solid var(--line); }
+  .reply-card.nested-reply { padding-left: 50px; background: color-mix(in srgb, var(--accent-soft) 24%, transparent); }
   .reply-card::before { content: ""; position: absolute; left: 20px; top: -22px; width: 2px; height: 32px; background: var(--line); }
+  .reply-card.nested-reply::before { left: 40px; }
   .reply-body { flex: 1; min-width: 0; }
   .reply-body p { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .replying-to { margin-top: 3px; color: var(--accent-strong); font-size: 12px; }
   .reply-actions { display: flex; gap: 8px; }
   .reply-actions button { padding: 2px 5px; border: 0; background: none; color: var(--muted); font-size: 12px; }
   .reply-actions button:hover { color: var(--accent-strong); }

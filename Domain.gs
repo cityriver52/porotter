@@ -23,16 +23,21 @@ function createPostRecord_(options) {
   };
 }
 
-function createReplyRecord_(postId, email, body) {
-  const timestamp = nowIso_();
+function createReplyRecord_(options) {
+  const timestamp = options.timestamp || nowIso_();
+  const authorType = String(options.authorType || 'user');
   return {
-    id: makeId_(),
-    postId: String(postId),
-    body: normalizeBody_(body, CONFIG_.MAX_REPLY_LENGTH, '返信'),
+    id: options.id || makeId_(),
+    postId: String(options.postId),
+    body: normalizeBody_(options.body, CONFIG_.MAX_REPLY_LENGTH, '返信'),
     createdAt: timestamp,
     updatedAt: timestamp,
     deletedAt: '',
-    authorEmail: normalizeEmail_(email)
+    authorEmail: normalizeEmail_(options.email),
+    parentReplyId: String(options.parentReplyId || ''),
+    authorType: authorType,
+    authorId: String(options.authorId || options.email || ''),
+    authorName: String(options.authorName || '')
   };
 }
 

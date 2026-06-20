@@ -29,7 +29,8 @@ const CONFIG_ = Object.freeze({
       name: 'Replies',
       headers: Object.freeze([
         'id', 'postId', 'body', 'createdAt', 'updatedAt',
-        'deletedAt', 'authorEmail'
+        'deletedAt', 'authorEmail', 'parentReplyId', 'authorType',
+        'authorId', 'authorName'
       ])
     }),
     SETTINGS: Object.freeze({

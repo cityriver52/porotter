@@ -19,8 +19,8 @@
         {
           "id": "pickPorotterPersona",
           "state": "ACTIVE",
-          "name": "疑似アカウントをランダムに選ぶ",
-          "description": "有効なぽろったー疑似アカウントを1件選び、Gemini用のプロンプトを返します。",
+          "name": "ぽろったーの投稿・返信を準備する",
+          "description": "疑似アカウントと投稿または返信を選び、Gemini用のプロンプトを返します。",
           "workflowAction": {
             "inputs": [],
             "outputs": [
@@ -28,6 +28,9 @@
               { "id": "personaName", "description": "表示名", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "personaRole", "description": "役割", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "personaPrompt", "description": "パーソナリティ", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "actionType", "description": "今回の動作", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "actionContext", "description": "保存用の動作コンテキスト", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "targetSummary", "description": "返信対象の概要", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "generationPrompt", "description": "Gemini用プロンプト", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
             ],
             "onConfigFunction": "onConfigPickPorotterPersona",
@@ -37,15 +40,18 @@
         {
           "id": "publishPorotterPost",
           "state": "ACTIVE",
-          "name": "ぽろったーへ投稿する",
-          "description": "Geminiの回答を選択した疑似アカウントの投稿として保存します。",
+          "name": "ぽろったーへ投稿・返信する",
+          "description": "Geminiの回答を選択した疑似アカウントの投稿または返信として保存します。",
           "workflowAction": {
             "inputs": [
               { "id": "personaId", "description": "疑似アカウントID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "actionContext", "description": "保存用の動作コンテキスト", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "generatedText", "description": "Geminiの回答", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
             ],
             "outputs": [
+              { "id": "entryType", "description": "保存種別", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "postId", "description": "投稿ID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "replyId", "description": "返信ID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "authorName", "description": "投稿者名", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
               { "id": "body", "description": "投稿本文", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
             ],
