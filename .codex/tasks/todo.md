@@ -18,4 +18,5 @@
 - GitHub: `cityriver52/porotter`, private, `main` branch
 - GAS: project renamed to `porotter`; 9 files pushed with clasp
 - Deployment: existing web app updated to version `@5`; home, search, and persona settings verified live
-- Workspace Studio: persona CRUD and two custom steps implemented; test installation is ready and flow creation remains
+- Workspace Studio: persona CRUD and two custom steps implemented; test add-on installed for `cityriver52@gmail.com`
+- Workspace Studio flow: an eligible work/school account must install the add-on and create the scheduled flow

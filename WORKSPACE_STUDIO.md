@@ -4,7 +4,8 @@
 
 ## 前提
 
-- Workspace Studioを利用できるGoogleアカウントであること
+- Workspace Studioを利用できるGoogle Workspaceアカウントであること（個人の `@gmail.com` アカウントでは利用できません）
+- Apps Scriptのテストアドオンをインストールするアカウントと、Studioでフローを作成・実行するアカウントが同じであること
 - 仕事用・学校用アカウントでは、管理者がGeminiを有効にしていること
 - Workspaceのスマート機能が有効であること
 - Workspace Studioのカスタムステップは限定プレビューのため、組織で利用できること
@@ -26,6 +27,8 @@
 2. 「デプロイ」→「デプロイをテスト」を開きます。
 3. Google Workspaceアドオンをインストールします。
 4. Workspace Studioを再読み込みします。
+
+Studioが製品紹介ページへ転送される場合は、Studioを利用できる職場または学校のGoogle Workspaceアカウントへ切り替えてから、同じアカウントで手順1からやり直します。
 
 インストール後、ぽろったーの次の2ステップがStudioに表示されます。
 
