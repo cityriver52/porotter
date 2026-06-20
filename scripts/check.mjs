@@ -48,6 +48,9 @@ if (!searchView.includes('id="filter-form"') || !searchView.includes('id="search
 if (!index.includes('data-persona-template') || !clientFile.includes("callApi('apiSavePersona'")) {
   errors.push('Persona management UI is incomplete');
 }
+if (!index.includes('id="daily-prompt"') || !index.includes('id="refresh-prompt"') || !clientFile.includes('const DAILY_PROMPTS')) {
+  errors.push("Today's Prompt randomization UI is incomplete");
+}
 
 if (errors.length) {
   console.error(errors.join('\n'));

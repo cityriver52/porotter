@@ -24,7 +24,8 @@
     thread: null,
     editTarget: null,
     confirmResolver: null,
-    loadingTimeline: false
+    loadingTimeline: false,
+    dailyPrompt: null
   };
 
   const queryOne = (selector, root = document) => root.querySelector(selector);
@@ -48,10 +49,26 @@
     }
   };
 
+  const DAILY_PROMPTS = Object.freeze([
+    { id: 'perspective', question: '今日、仕事の見方が少し変わった瞬間は？', lead: '今日、仕事の見方が少し変わったのは、' },
+    { id: 'friction', question: '今日いちばん小さかった違和感は？', lead: '今日いちばん小さかった違和感は、' },
+    { id: 'expectation', question: '今日、予想と実際が違ったことは？', lead: '今日、予想と実際が違ったのは、' },
+    { id: 'from-others', question: '誰かの言葉や行動から気づいたことは？', lead: '誰かの言葉や行動から気づいたのは、' },
+    { id: 'went-well', question: '今日うまく進んだ理由を一つ挙げるなら？', lead: '今日うまく進んだ理由は、' },
+    { id: 'blocker', question: '仕事が止まったとき、本当の障害は何だった？', lead: '仕事が止まったとき、本当の障害だったのは、' },
+    { id: 'routine', question: '無意識に続けている作業で、変えられそうなことは？', lead: '無意識に続けている作業で、変えられそうなのは、' },
+    { id: 'other-view', question: '相手の立場に立って、初めて見えたことは？', lead: '相手の立場に立って初めて見えたのは、' },
+    { id: 'decision', question: '判断に迷った場面で、自分が大切にしたことは？', lead: '判断に迷った場面で大切にしたのは、' },
+    { id: 'lesson', question: '今日の失敗や遠回りが教えてくれたことは？', lead: '今日の失敗や遠回りが教えてくれたのは、' },
+    { id: 'tomorrow', question: '明日の自分に残しておきたい仕事のヒントは？', lead: '明日の自分に残しておきたい仕事のヒントは、' },
+    { id: 'small-change', question: '忙しさの中で見逃しかけた小さな変化は？', lead: '忙しさの中で見逃しかけた小さな変化は、' }
+  ]);
+
   document.addEventListener('DOMContentLoaded', initialize);
 
   async function initialize() {
     bindEvents();
+    renderDailyPrompt();
     renderSkeletons();
     try {
       const data = await callApi('apiBootstrap', state.filters);
@@ -98,6 +115,7 @@
     queryOne('#trash-list').addEventListener('click', handleTrashAction);
     queryOne('#discovery-list').addEventListener('click', handleDiscoveryAction);
     queryOne('#refresh-discovery').addEventListener('click', refreshDiscovery);
+    queryOne('#refresh-prompt').addEventListener('click', renderDailyPrompt);
     queryOne('#use-prompt').addEventListener('click', useDailyPrompt);
 
     queryOne('#reply-form').addEventListener('submit', createReply);
@@ -682,9 +700,23 @@
     if (button) openThread(button.dataset.postId);
   }
 
+  function chooseDailyPrompt(prompts, currentId, randomValue) {
+    if (!Array.isArray(prompts) || !prompts.length) return null;
+    const candidates = prompts.length === 1 ? prompts : prompts.filter(prompt => prompt.id !== currentId);
+    const roll = Math.max(0, Math.min(Number(randomValue) || 0, 0.999999999));
+    return candidates[Math.floor(roll * candidates.length)];
+  }
+
+  function renderDailyPrompt() {
+    state.dailyPrompt = chooseDailyPrompt(DAILY_PROMPTS, state.dailyPrompt && state.dailyPrompt.id, Math.random());
+    if (!state.dailyPrompt) return;
+    queryOne('#daily-prompt').textContent = state.dailyPrompt.question;
+  }
+
   function useDailyPrompt() {
+    if (!state.dailyPrompt) renderDailyPrompt();
     focusComposer();
-    queryOne('#post-body').value = '今日いちばん小さかった違和感は、';
+    queryOne('#post-body').value = state.dailyPrompt ? state.dailyPrompt.lead : '';
     updateCount('#post-body', '#post-count');
     queryOne('#post-body').focus();
     queryOne('#post-body').setSelectionRange(queryOne('#post-body').value.length, queryOne('#post-body').value.length);
