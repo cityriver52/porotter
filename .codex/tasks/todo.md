@@ -12,7 +12,7 @@
 ## Verification
 
 - Static check: 4 GAS files and 57 unique DOM IDs passed
-- Automated tests: 3/3 passed (CRUD, replies, filters, pagination, trash, export, settings, authorization)
+- Automated tests: server 3/3 and client URL-link formatting 2/2 passed
 - Browser: desktop and 390 × 844 responsive layouts passed
 - Browser flows: create post, add tag, reply, search, settings navigation passed
 - GitHub: `cityriver52/mySNS`, private, `main` branch

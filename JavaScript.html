@@ -755,7 +755,31 @@
   }
 
   function formatBody(value) {
-    return escapeHtml(String(value || '')).replace(/\n/g, '<br>');
+    const text = String(value || '');
+    const urlPattern = /(?:https?:\/\/|www\.)[^\s<>"']+/giu;
+    let cursor = 0;
+    let html = '';
+
+    for (const match of text.matchAll(urlPattern)) {
+      const original = match[0];
+      let url = original;
+      let trailing = '';
+
+      while (/[.,!?;:)。、！？）」』】〉》\]\}]$/u.test(url)) {
+        trailing = url.slice(-1) + trailing;
+        url = url.slice(0, -1);
+      }
+      if (!url) continue;
+
+      html += escapeHtml(text.slice(cursor, match.index));
+      const href = /^www\./i.test(url) ? 'https://' + url : url;
+      html += `<a class="post-link" href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(url)}</a>`;
+      html += escapeHtml(trailing);
+      cursor = match.index + original.length;
+    }
+
+    html += escapeHtml(text.slice(cursor));
+    return html.replace(/\n/g, '<br>');
   }
 
   function escapeHtml(value) {

@@ -146,6 +146,8 @@
   .post-handle, .post-time { color: var(--muted); font-size: 13px; }
   .post-time::before { content: "·"; margin-right: 6px; }
   .post-body { margin: 4px 0 8px; overflow-wrap: anywhere; white-space: pre-wrap; font-size: 15px; line-height: 1.62; }
+  .post-link { color: var(--accent-strong); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-decoration-thickness: 1px; text-underline-offset: 3px; overflow-wrap: anywhere; }
+  .post-link:hover { text-decoration-color: currentColor; }
   .post-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; }
   .post-tags button { padding: 0; border: 0; background: none; color: var(--accent-strong); font-size: 13px; }
   .post-actions { display: flex; justify-content: space-between; max-width: 390px; margin-top: 5px; }
@@ -171,9 +173,6 @@
 
   .right-rail { position: sticky; top: 0; align-self: start; display: grid; gap: 15px; max-height: 100vh; overflow-y: auto; padding: 22px 16px 30px 26px; }
   .rail-card { padding: 17px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-  .private-card { display: flex; gap: 11px; background: linear-gradient(145deg, var(--surface), var(--accent-soft)); }
-  .private-card p { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
-  .private-icon { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: white; }
   .rail-heading { display: flex; align-items: center; justify-content: space-between; }
   .rail-heading h2 { margin: 0; font-size: 17px; }
   .discovery-list { display: grid; gap: 7px; margin-top: 9px; }
