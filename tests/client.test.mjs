@@ -20,6 +20,11 @@ const promptEnd = client.indexOf('  function renderDailyPrompt()');
 if (promptStart < 0 || promptEnd < 0) throw new Error('Daily prompt selector was not found.');
 vm.runInContext(`${client.slice(promptStart, promptEnd)}\nthis.chooseDailyPrompt = chooseDailyPrompt;`, context);
 
+const tagStart = client.indexOf('  function parseTagInput(value)');
+const tagEnd = client.indexOf('  function tagAutocompleteConfig(mode)');
+if (tagStart < 0 || tagEnd < 0) throw new Error('Tag autocomplete helpers were not found.');
+vm.runInContext(`${client.slice(tagStart, tagEnd)}\nthis.parseTagInput = parseTagInput; this.normalizeSingleTag = normalizeSingleTag; this.currentTagFragment = currentTagFragment; this.replaceCurrentTag = replaceCurrentTag; this.matchingTags = matchingTags;`, context);
+
 test('formatBody converts http and www URLs into safe links', () => {
   const html = context.formatBody('確認 https://example.com/path?a=1&b=2。 www.openai.com も。');
 
@@ -55,4 +60,23 @@ test('daily prompt selection is randomizable and avoids the current question', (
   assert.equal(context.chooseDailyPrompt(prompts, 'a', 0.999999).id, 'c');
   assert.equal(context.chooseDailyPrompt([{ id: 'only' }], 'only', 0.5).id, 'only');
   assert.equal(context.chooseDailyPrompt([], '', 0.5), null);
+});
+
+test('tag input accepts new tags and replaces only the current tag', () => {
+  assert.deepEqual(Array.from(context.parseTagInput('#学び 新しいタグ #学び')), ['学び', '新しいタグ']);
+  assert.equal(context.normalizeSingleTag('#自由入力'), '自由入力');
+  assert.equal(context.currentTagFragment('#学び #違', true), '違');
+  assert.equal(context.replaceCurrentTag('#学び #違', '違和感', true), '#学び #違和感 ');
+  assert.equal(context.replaceCurrentTag('学', '学び', false), '#学び');
+});
+
+test('tag suggestions match existing tags by text and prefer prefix matches', () => {
+  const tags = [
+    { name: '改善メモ', count: 2 },
+    { name: '業務改善', count: 9 },
+    { name: '学び', count: 5 }
+  ];
+  const matches = Array.from(context.matchingTags(tags, '改善', []), tag => tag.name);
+  assert.deepEqual(matches, ['改善メモ', '業務改善']);
+  assert.deepEqual(Array.from(context.matchingTags(tags, '', ['学び']), tag => tag.name), ['業務改善', '改善メモ']);
 });

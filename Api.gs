@@ -6,11 +6,12 @@ function apiBootstrap(filters) {
   return runApi_(function (email) {
     ensureSchema_(getSpreadsheet_());
     ensureDefaultSettings_(email);
+    const snapshot = createReadSnapshot_();
     return {
-      timeline: buildTimeline_(filters || {}),
-      settings: publicSettings_(readSettings_(), email),
-      discovery: buildDiscovery_(),
-      personas: listPersonas_(email)
+      timeline: buildTimeline_(filters || {}, snapshot),
+      settings: publicSettings_(snapshot.settings, email),
+      discovery: buildDiscovery_(snapshot),
+      personas: listPersonas_(email, snapshot.personas)
     };
   });
 }
@@ -22,33 +23,19 @@ function apiTimeline(filters) {
 }
 
 function apiCreatePost(payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
-      const timestamp = nowIso_();
-      const post = {
-        id: makeId_(),
-        body: normalizeBody_(payload && payload.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
-        tags: JSON.stringify(normalizeTags_(payload && payload.tags)),
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        favorite: false,
-        deletedAt: '',
-        authorEmail: email,
-        authorType: 'user',
-        authorId: email,
-        authorName: '',
-        sourceLabel: '',
-        sourceUrl: ''
-      };
+  return runLockedApi_(function (email) {
+      const post = createPostRecord_({
+        email: email,
+        body: payload && payload.body,
+        tags: payload && payload.tags
+      });
       appendRecord_(CONFIG_.SHEETS.POSTS, post);
       return presentPost_(post, 0);
-    });
   });
 }
 
 function apiUpdatePost(postId, payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
       const patch = {
@@ -58,13 +45,11 @@ function apiUpdatePost(postId, payload) {
       };
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, patch);
       return presentPost_(Object.assign({}, post, patch), activeReplyCount_(post.id));
-    });
   });
 }
 
 function apiDeletePost(postId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
       const timestamp = nowIso_();
@@ -77,19 +62,16 @@ function apiDeletePost(postId) {
           patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
         });
       return { id: post.id, deletedAt: timestamp };
-    });
   });
 }
 
 function apiToggleFavorite(postId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
       const favorite = !parseBoolean_(post.favorite);
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { favorite: favorite });
       return { id: post.id, favorite: favorite };
-    });
   });
 }
 
@@ -97,9 +79,9 @@ function apiThread(postId) {
   return runApi_(function (email) {
     const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
     assertNotDeleted_(post);
-    const replies = readRecords_(CONFIG_.SHEETS.REPLIES)
+    const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
       .filter(function (reply) {
-        return String(reply.postId) === String(postId) && !reply.deletedAt && normalizeEmail_(reply.authorEmail) === email;
+        return String(reply.postId) === String(postId) && !reply.deletedAt;
       })
       .sort(compareCreatedAscending_)
       .map(presentReply_);
@@ -108,29 +90,17 @@ function apiThread(postId) {
 }
 
 function apiCreateReply(postId, payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
-      const timestamp = nowIso_();
-      const reply = {
-        id: makeId_(),
-        postId: post.id,
-        body: normalizeBody_(payload && payload.body, CONFIG_.MAX_REPLY_LENGTH, '返信'),
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        deletedAt: '',
-        authorEmail: email
-      };
+      const reply = createReplyRecord_(post.id, email, payload && payload.body);
       appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
       return presentReply_(reply);
-    });
   });
 }
 
 function apiUpdateReply(replyId, payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const reply = ownedRecord_(CONFIG_.SHEETS.REPLIES, replyId, email);
       assertNotDeleted_(reply);
       const patch = {
@@ -139,28 +109,25 @@ function apiUpdateReply(replyId, payload) {
       };
       patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, patch);
       return presentReply_(Object.assign({}, reply, patch));
-    });
   });
 }
 
 function apiDeleteReply(replyId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const reply = ownedRecord_(CONFIG_.SHEETS.REPLIES, replyId, email);
       assertNotDeleted_(reply);
       const timestamp = nowIso_();
       patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
       return { id: reply.id, deletedAt: timestamp };
-    });
   });
 }
 
 function apiTrash() {
   return runApi_(function (email) {
-    const replyCounts = replyCountsByPost_(true);
-    const posts = readRecords_(CONFIG_.SHEETS.POSTS)
+    const replyCounts = replyCountsByPost_(true, null, email);
+    const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
       .filter(function (post) {
-        return Boolean(post.deletedAt) && normalizeEmail_(post.authorEmail) === email;
+        return Boolean(post.deletedAt);
       })
       .sort(compareDeletedDescending_)
       .map(function (post) {
@@ -171,8 +138,7 @@ function apiTrash() {
 }
 
 function apiRestorePost(postId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       if (!post.deletedAt) throw new Error('この投稿は削除されていません。');
       const cascadeTimestamp = String(post.deletedAt);
@@ -185,13 +151,11 @@ function apiRestorePost(postId) {
           patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: '' });
         });
       return { id: post.id };
-    });
   });
 }
 
 function apiPermanentlyDeletePost(postId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       if (!post.deletedAt) throw new Error('ごみ箱にある投稿だけを完全に削除できます。');
 
@@ -201,7 +165,6 @@ function apiPermanentlyDeletePost(postId) {
         .forEach(function (reply) { deleteRecordRow_(CONFIG_.SHEETS.REPLIES, reply._row); });
       deleteRecordRow_(CONFIG_.SHEETS.POSTS, post._row);
       return { id: post.id };
-    });
   });
 }
 
@@ -218,8 +181,7 @@ function apiListPersonas() {
 }
 
 function apiSavePersona(personaId, payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const normalized = normalizePersona_(payload || {});
       const timestamp = nowIso_();
       if (personaId) {
@@ -236,35 +198,29 @@ function apiSavePersona(personaId, payload) {
       }, normalized);
       appendRecord_(CONFIG_.SHEETS.PERSONAS, persona);
       return presentPersona_(persona);
-    });
   });
 }
 
 function apiTogglePersona(personaId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const persona = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
       const enabled = !parseBoolean_(persona.enabled);
       const updatedAt = nowIso_();
       patchRecord_(CONFIG_.SHEETS.PERSONAS, persona._row, { enabled: enabled, updatedAt: updatedAt });
       return presentPersona_(Object.assign({}, persona, { enabled: enabled, updatedAt: updatedAt }));
-    });
   });
 }
 
 function apiDeletePersona(personaId) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const persona = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
       deleteRecordRow_(CONFIG_.SHEETS.PERSONAS, persona._row);
       return { id: String(persona.id) };
-    });
   });
 }
 
 function apiSaveSettings(payload) {
-  return runApi_(function (email) {
-    return withScriptLock_(function () {
+  return runLockedApi_(function (email) {
       const displayName = String(payload && payload.displayName || '').trim();
       if (!displayName || displayName.length > 40) {
         throw new Error('表示名は1〜40文字で入力してください。');
@@ -273,11 +229,8 @@ function apiSaveSettings(payload) {
         ? payload.theme
         : 'system';
       const pageSize = clampInteger_(payload && payload.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
-      writeSetting_('displayName', displayName);
-      writeSetting_('theme', theme);
-      writeSetting_('pageSize', String(pageSize));
+      writeSettings_({ displayName: displayName, theme: theme, pageSize: String(pageSize) });
       return publicSettings_({ displayName: displayName, theme: theme, pageSize: String(pageSize) }, email);
-    });
   });
 }
 
@@ -290,11 +243,9 @@ function apiDiscovery() {
 function apiExport(format) {
   return runApi_(function (email) {
     const normalizedFormat = String(format || 'json').toLowerCase();
-    const posts = readRecords_(CONFIG_.SHEETS.POSTS)
-      .filter(function (post) { return normalizeEmail_(post.authorEmail) === email; })
+    const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
       .map(function (post) { return exportRecord_(post); });
-    const replies = readRecords_(CONFIG_.SHEETS.REPLIES)
-      .filter(function (reply) { return normalizeEmail_(reply.authorEmail) === email; })
+    const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
       .map(function (reply) { return exportRecord_(reply); });
 
     if (normalizedFormat === 'csv') {
@@ -324,21 +275,37 @@ function runApi_(callback) {
   }
 }
 
-function buildTimeline_(rawFilters) {
+function runLockedApi_(callback) {
+  return runApi_(function (email) {
+    return withScriptLock_(function () {
+      return callback(email);
+    });
+  });
+}
+
+function createReadSnapshot_() {
+  return {
+    posts: readRecords_(CONFIG_.SHEETS.POSTS),
+    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
+    settings: readSettings_(),
+    personas: readRecords_(CONFIG_.SHEETS.PERSONAS)
+  };
+}
+
+function buildTimeline_(rawFilters, snapshot) {
   const filters = rawFilters || {};
   const email = currentUserEmail_();
-  const activeReplies = readRecords_(CONFIG_.SHEETS.REPLIES).filter(function (reply) {
-    return !reply.deletedAt && normalizeEmail_(reply.authorEmail) === email;
+  const allReplies = snapshot && snapshot.replies || readRecords_(CONFIG_.SHEETS.REPLIES);
+  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
+  const activeReplies = recordsOwnedBy_(allReplies, email).filter(function (reply) {
+    return !reply.deletedAt;
   });
-  const replyCounts = activeReplies.reduce(function (counts, reply) {
-    const key = String(reply.postId);
-    counts[key] = (counts[key] || 0) + 1;
-    return counts;
-  }, {});
+  const replyCounts = countRepliesByPost_(activeReplies, true);
 
-  let posts = readRecords_(CONFIG_.SHEETS.POSTS).filter(function (post) {
-    return !post.deletedAt && normalizeEmail_(post.authorEmail) === email;
+  const activePosts = recordsOwnedBy_(allPosts, email).filter(function (post) {
+    return !post.deletedAt;
   });
+  let posts = activePosts.slice();
 
   const query = String(filters.query || '').trim().toLocaleLowerCase();
   const tag = String(filters.tag || '').replace(/^#/, '').trim().toLocaleLowerCase();
@@ -362,7 +329,7 @@ function buildTimeline_(rawFilters) {
   posts.sort(compareCreatedDescending_);
   const total = posts.length;
   const offset = clampInteger_(filters.offset, 0, 0, Math.max(0, total));
-  const settings = readSettings_();
+  const settings = snapshot && snapshot.settings || readSettings_();
   const configuredPageSize = clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
   const pageSize = clampInteger_(filters.pageSize, configuredPageSize, 5, CONFIG_.MAX_PAGE_SIZE);
   const page = posts.slice(offset, offset + pageSize).map(function (post) {
@@ -370,9 +337,7 @@ function buildTimeline_(rawFilters) {
   });
 
   const tagCounts = {};
-  readRecords_(CONFIG_.SHEETS.POSTS)
-    .filter(function (post) { return !post.deletedAt && normalizeEmail_(post.authorEmail) === email; })
-    .forEach(function (post) {
+  activePosts.forEach(function (post) {
       parseTags_(post.tags).forEach(function (item) {
         tagCounts[item] = (tagCounts[item] || 0) + 1;
       });
@@ -390,11 +355,12 @@ function buildTimeline_(rawFilters) {
   };
 }
 
-function buildDiscovery_() {
+function buildDiscovery_(snapshot) {
   const email = currentUserEmail_();
-  const posts = readRecords_(CONFIG_.SHEETS.POSTS)
-    .filter(function (post) { return !post.deletedAt && normalizeEmail_(post.authorEmail) === email; });
-  const counts = replyCountsByPost_(false);
+  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
+  const posts = recordsOwnedBy_(allPosts, email)
+    .filter(function (post) { return !post.deletedAt; });
+  const counts = replyCountsByPost_(false, snapshot && snapshot.replies, email);
   const todayMonthDay = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd');
   const currentYear = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
   const onThisDay = posts.filter(function (post) {
@@ -473,9 +439,8 @@ function publicSettings_(settings, email) {
   };
 }
 
-function listPersonas_(email) {
-  return readRecords_(CONFIG_.SHEETS.PERSONAS)
-    .filter(function (persona) { return normalizeEmail_(persona.authorEmail) === normalizeEmail_(email); })
+function listPersonas_(email, records) {
+  return recordsOwnedBy_(records || readRecords_(CONFIG_.SHEETS.PERSONAS), email)
     .sort(function (a, b) {
       return Number(parseBoolean_(b.enabled)) - Number(parseBoolean_(a.enabled)) ||
         String(a.name).localeCompare(String(b.name), 'ja');
@@ -501,13 +466,9 @@ function activeReplyCount_(postId) {
   }).length;
 }
 
-function replyCountsByPost_(includeDeleted) {
-  return readRecords_(CONFIG_.SHEETS.REPLIES).reduce(function (counts, reply) {
-    if (!includeDeleted && reply.deletedAt) return counts;
-    const key = String(reply.postId);
-    counts[key] = (counts[key] || 0) + 1;
-    return counts;
-  }, {});
+function replyCountsByPost_(includeDeleted, records, email) {
+  const replies = records || readRecords_(CONFIG_.SHEETS.REPLIES);
+  return countRepliesByPost_(email ? recordsOwnedBy_(replies, email) : replies, includeDeleted);
 }
 
 function compareCreatedDescending_(a, b) {
