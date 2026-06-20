@@ -46,6 +46,8 @@ class FakeSheet {
 class FakeSpreadsheet {
   constructor(id, name) { this.id = id; this.name = name; this.sheets = [new FakeSheet('Sheet1')]; }
   getId() { return this.id; }
+  getName() { return this.name; }
+  setName(name) { this.name = name; return this; }
   getUrl() { return `https://docs.google.com/spreadsheets/d/${this.id}`; }
   getSheetByName(name) { return this.sheets.find(sheet => sheet.name === name) || null; }
   insertSheet(name) { const sheet = new FakeSheet(name); this.sheets.push(sheet); return sheet; }
@@ -61,7 +63,8 @@ function createContext() {
   let activeEmail = 'owner@example.com';
   const scriptProperties = {
     getProperty: key => propertyMap.get(key) || null,
-    setProperty: (key, value) => propertyMap.set(key, String(value))
+    setProperty: (key, value) => propertyMap.set(key, String(value)),
+    deleteProperty: key => propertyMap.delete(key)
   };
   const user = () => ({ getEmail: () => activeEmail });
 
@@ -107,11 +110,23 @@ function createContext() {
     HtmlService: {
       createTemplateFromFile: () => ({ evaluate: () => ({ setTitle() { return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } }) }),
       createHtmlOutputFromFile: () => ({ getContent: () => '' })
+    },
+    AddOnsResponseService: {
+      newReturnOutputVariablesAction: () => ({
+        setVariableDataMap(variableDataMap) { this.variableDataMap = variableDataMap; return this; }
+      }),
+      newHostAppAction: () => ({
+        setWorkflowAction(workflowAction) { this.workflowAction = workflowAction; return this; }
+      }),
+      newRenderActionBuilder: () => ({
+        setHostAppAction(hostAppAction) { this.hostAppAction = hostAppAction; return this; },
+        build() { return { hostAppAction: this.hostAppAction }; }
+      })
     }
   });
   context.__setActiveEmail = value => { activeEmail = value; };
 
-  for (const file of ['Config.gs', 'Repository.gs', 'Api.gs', 'Code.gs']) {
+  for (const file of ['Config.gs', 'Repository.gs', 'Api.gs', 'Code.gs', 'Studio.gs']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   }
   return context;
@@ -119,9 +134,9 @@ function createContext() {
 
 test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   const app = createContext();
-  const setup = app.setupMySNS();
+  const setup = app.setupPorotter();
   assert.equal(setup.allowedEmail, 'owner@example.com');
-  assert.equal(app.checkMySNSSetup().configured, true);
+  assert.equal(app.checkPorotterSetup().configured, true);
 
   const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'] });
   assert.equal(first.ok, true);
@@ -163,7 +178,7 @@ test('setup, CRUD, replies, trash, search and export work as one flow', () => {
 
 test('validation and authorization are enforced on the server', () => {
   const app = createContext();
-  app.setupMySNS();
+  app.setupPorotter();
 
   assert.equal(app.apiCreatePost({ body: '   ', tags: [] }).ok, false);
   assert.equal(app.apiCreatePost({ body: 'x'.repeat(281), tags: [] }).ok, false);
@@ -177,7 +192,7 @@ test('validation and authorization are enforced on the server', () => {
 
 test('timeline filters, pagination, settings and permanent deletion work', () => {
   const app = createContext();
-  app.setupMySNS();
+  app.setupPorotter();
 
   const created = [];
   for (let index = 0; index < 7; index += 1) {
@@ -213,4 +228,44 @@ test('timeline filters, pagination, settings and permanent deletion work', () =>
   app.apiPermanentlyDeletePost(created[1].id);
   assert.equal(app.apiTrash().data.posts.length, 0);
   assert.equal(app.apiTimeline({}).data.total, 6);
+});
+
+test('personas and Workspace Studio custom steps create attributed AI posts', () => {
+  const app = createContext();
+  const setup = app.setupPorotter();
+  assert.match(setup.message, /ぽろったー/);
+
+  const saved = app.apiSavePersona('', {
+    name: '経理の見張り番',
+    role: '財務経理担当',
+    prompt: '数字と証跡の抜けに気づきます。',
+    enabled: true
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(app.apiListPersonas().data.length, 1);
+
+  const picked = app.onExecutePickPorotterPersona();
+  const pickedMap = picked.hostAppAction.workflowAction.variableDataMap;
+  assert.equal(pickedMap.personaId.stringValues[0], saved.data.id);
+  assert.match(pickedMap.generationPrompt.stringValues[0], /過去7日/);
+
+  const published = app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [saved.data.id] },
+          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の予算資料', sourceUrl: '' })] }
+        }
+      }
+    }
+  });
+  assert.ok(published.hostAppAction.workflowAction.variableDataMap.postId.stringValues[0]);
+  const timeline = app.apiTimeline({});
+  assert.equal(timeline.data.total, 1);
+  assert.equal(timeline.data.posts[0].authorType, 'persona');
+  assert.equal(timeline.data.posts[0].authorName, '経理の見張り番');
+
+  assert.equal(app.apiTogglePersona(saved.data.id).data.enabled, false);
+  assert.equal(app.apiDeletePersona(saved.data.id).ok, true);
+  assert.equal(app.apiListPersonas().data.length, 0);
 });

@@ -5,6 +5,7 @@
 
   const state = {
     settings: null,
+    personas: [],
     posts: [],
     tags: [],
     filters: {
@@ -28,6 +29,24 @@
 
   const queryOne = (selector, root = document) => root.querySelector(selector);
   const queryAll = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const PERSONA_TEMPLATES = {
+    finance: {
+      name: '経理の見張り番', role: '財務経理担当',
+      prompt: '数字の整合性、予算、支払時期、証跡、継続コストに目を向けます。落ち着いた口調で、見落としやすい確認点を短く指摘します。'
+    },
+    project: {
+      name: 'プロジェクト担当', role: 'このプロジェクトの担当',
+      prompt: '目的、期限、関係者、未決事項、次の具体的な一歩を意識します。現場目線で、実行につながる問いを投げかけます。'
+    },
+    wild: {
+      name: '斜め上の発想家', role: '突飛なアイデアを出す人',
+      prompt: '前提をひっくり返し、異分野の比喩や大胆な仮説から新しい選択肢を提示します。少し遊び心があり、しかし仕事に応用できる案にします。'
+    },
+    careful: {
+      name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人',
+      prompt: '曖昧な表現、例外、利用者の困りごと、手順の抜けを丁寧に見つけます。穏やかで誠実な口調で、小さな改善案を示します。'
+    }
+  };
 
   document.addEventListener('DOMContentLoaded', initialize);
 
@@ -37,6 +56,7 @@
     try {
       const data = await callApi('apiBootstrap', state.filters);
       state.settings = data.settings;
+      state.personas = data.personas || [];
       state.posts = data.timeline.posts;
       state.tags = data.timeline.tags;
       state.hasMore = data.timeline.hasMore;
@@ -46,6 +66,7 @@
       renderTimeline();
       renderTagFilters();
       renderDiscovery(data.discovery);
+      renderPersonas();
       document.querySelector('#app').setAttribute('aria-busy', 'false');
     } catch (error) {
       renderFatalError(error);
@@ -65,6 +86,7 @@
     queryOne('#clear-filters').addEventListener('click', clearFilters);
     queryOne('#tag-filter-list').addEventListener('click', filterByTag);
     queryOne('#load-more').addEventListener('click', () => loadTimeline(true));
+    queryOne('#search-load-more').addEventListener('click', () => loadTimeline(true));
 
     queryAll('[data-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
     queryOne('#side-compose-button').addEventListener('click', focusComposer);
@@ -72,6 +94,7 @@
     queryOne('#mobile-theme-button').addEventListener('click', toggleTheme);
 
     queryOne('#timeline').addEventListener('click', handleTimelineAction);
+    queryOne('#search-timeline').addEventListener('click', handleTimelineAction);
     queryOne('#trash-list').addEventListener('click', handleTrashAction);
     queryOne('#discovery-list').addEventListener('click', handleDiscoveryAction);
     queryOne('#refresh-discovery').addEventListener('click', refreshDiscovery);
@@ -84,6 +107,10 @@
     queryAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => closeDialog(button.dataset.closeDialog)));
 
     queryOne('#settings-form').addEventListener('submit', saveSettings);
+    queryOne('#persona-form').addEventListener('submit', savePersona);
+    queryOne('#persona-cancel').addEventListener('click', resetPersonaForm);
+    queryOne('.persona-templates').addEventListener('click', applyPersonaTemplate);
+    queryOne('#persona-list').addEventListener('click', handlePersonaAction);
     queryAll('[data-export]').forEach(button => button.addEventListener('click', () => exportData(button.dataset.export, button)));
 
     queryOne('#confirm-cancel').addEventListener('click', () => resolveConfirmation(false));
@@ -125,6 +152,9 @@
     queryOne('#email-input').value = state.settings.email;
     queryOne('#theme-input').value = state.settings.theme;
     queryOne('#page-size-input').value = String(state.settings.pageSize);
+    queryOne('#persona-name').maxLength = state.settings.maxPersonaNameLength;
+    queryOne('#persona-role').maxLength = state.settings.maxPersonaRoleLength;
+    queryOne('#persona-prompt').maxLength = state.settings.maxPersonaPromptLength;
     applyTheme(state.settings.theme);
     queryOne('#post-body').maxLength = state.settings.maxPostLength;
     queryOne('#reply-body').maxLength = state.settings.maxReplyLength;
@@ -238,15 +268,25 @@
   async function filterByTag(event) {
     const button = event.target.closest('[data-filter-tag]');
     if (!button) return;
+    if (state.currentView !== 'search') {
+      await switchView('search', false);
+    }
     state.filters.tag = state.filters.tag === button.dataset.filterTag ? '' : button.dataset.filterTag;
     state.filters.offset = 0;
     await loadTimeline(false);
   }
 
+  function timelineTargets() {
+    return state.currentView === 'search'
+      ? { list: '#search-timeline', status: '#search-timeline-status', loadMore: '#search-load-more' }
+      : { list: '#timeline', status: '#timeline-status', loadMore: '#load-more' };
+  }
+
   async function loadTimeline(append) {
     if (state.loadingTimeline) return;
     state.loadingTimeline = true;
-    const loadMore = queryOne('#load-more');
+    const targets = timelineTargets();
+    const loadMore = queryOne(targets.loadMore);
     setButtonBusy(loadMore, true, '読み込み中…');
     if (!append) {
       state.filters.offset = 0;
@@ -263,7 +303,7 @@
       renderTagFilters();
     } catch (error) {
       showToast(error.message, true);
-      if (!append) renderEmptyState('読み込めませんでした', 'しばらく待ってから、もう一度お試しください。');
+      if (!append) renderEmptyState('読み込めませんでした', 'しばらく待ってから、もう一度お試しください。', targets.list);
     } finally {
       state.loadingTimeline = false;
       setButtonBusy(loadMore, false);
@@ -271,7 +311,8 @@
   }
 
   function renderTimeline() {
-    const timeline = queryOne('#timeline');
+    const targets = timelineTargets();
+    const timeline = queryOne(targets.list);
     if (!state.posts.length) {
       const filtered = Boolean(state.filters.query || state.filters.tag || state.filters.startDate || state.filters.endDate || state.filters.replyState || state.filters.favoriteOnly);
       timeline.innerHTML = emptyStateHtml(
@@ -281,25 +322,32 @@
     } else {
       timeline.innerHTML = state.posts.map(post => postHtml(post)).join('');
     }
-    queryOne('#timeline-status').textContent = state.total ? `${state.total}件の投稿` : '';
-    queryOne('#load-more').hidden = !state.hasMore;
+    queryOne(targets.status).textContent = state.total ? `${state.total}件の投稿` : '';
+    queryOne(targets.loadMore).hidden = !state.hasMore;
     renderFilterSummary();
   }
 
   function postHtml(post, options = {}) {
     const deleted = Boolean(post.deletedAt);
     const edited = post.updatedAt && post.updatedAt !== post.createdAt;
+    const isPersona = post.authorType === 'persona';
+    const authorName = isPersona ? (post.authorName || 'AIアカウント') : (state.settings && state.settings.displayName || 'me');
+    const sourceHtml = post.sourceLabel || post.sourceUrl
+      ? `<div class="post-source">参照：${post.sourceUrl ? `<a href="${escapeAttr(post.sourceUrl)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(post.sourceLabel || 'Google Drive')}</a>` : escapeHtml(post.sourceLabel)}</div>`
+      : '';
     return `
       <article class="post-card ${options.threadRoot ? 'thread-root' : ''}" data-post-id="${escapeAttr(post.id)}">
-        <span class="avatar">${escapeHtml(initials(state.settings && state.settings.displayName))}</span>
+        <span class="avatar ${isPersona ? 'ai' : ''}">${escapeHtml(initials(authorName))}</span>
         <div class="post-main">
           <div class="post-meta">
-            <strong>${escapeHtml(state.settings && state.settings.displayName || 'me')}</strong>
-            <span class="post-handle">@private</span>
+            <strong>${escapeHtml(authorName)}</strong>
+            ${isPersona ? '<span class="ai-badge">AI</span>' : ''}
+            <span class="post-handle">${isPersona ? '@porotter-ai' : '@private'}</span>
             <time class="post-time" datetime="${escapeAttr(post.createdAt)}" title="${escapeAttr(formatExactDate(post.createdAt))}">${escapeHtml(formatRelativeDate(post.createdAt))}</time>
             ${edited ? '<span class="edited-label">編集済み</span>' : ''}
           </div>
           <p class="post-body">${formatBody(post.body)}</p>
+          ${sourceHtml}
           ${post.tags && post.tags.length ? `<div class="post-tags">${post.tags.map(tag => `<button type="button" data-filter-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</button>`).join('')}</div>` : ''}
           ${deleted ? `
             <div class="trash-actions">
@@ -536,7 +584,7 @@
     }
   }
 
-  async function switchView(view) {
+  async function switchView(view, load = true) {
     state.currentView = view;
     queryAll('[data-view]').forEach(button => {
       const active = button.dataset.view === view;
@@ -548,16 +596,26 @@
     const timelineVisible = view === 'timeline' || view === 'favorites';
     queryOne('#timeline-view').hidden = !timelineVisible;
     queryOne('#timeline-view').classList.toggle('active', timelineVisible);
+    queryOne('#composer').hidden = view !== 'timeline';
+    queryOne('#search-view').hidden = view !== 'search';
     queryOne('#trash-view').hidden = view !== 'trash';
     queryOne('#settings-view').hidden = view !== 'settings';
 
     if (timelineVisible) {
       queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : 'ホーム';
-      state.filters.favoriteOnly = view === 'favorites';
-      state.filters.offset = 0;
-      await loadTimeline(false);
+      state.filters = {
+        query: '', tag: '', startDate: '', endDate: '', replyState: '',
+        favoriteOnly: view === 'favorites', offset: 0
+      };
+      if (load) await loadTimeline(false);
+    } else if (view === 'search') {
+      state.filters.favoriteOnly = false;
+      readFilterControls();
+      if (load) await loadTimeline(false);
     } else if (view === 'trash') {
-      await loadTrash();
+      if (load) await loadTrash();
+    } else if (view === 'settings') {
+      renderPersonas();
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -638,6 +696,117 @@
       queryOne('#composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
       setTimeout(() => queryOne('#post-body').focus(), 250);
     }
+  }
+
+  function applyPersonaTemplate(event) {
+    const button = event.target.closest('[data-persona-template]');
+    if (!button) return;
+    const template = PERSONA_TEMPLATES[button.dataset.personaTemplate];
+    if (!template) return;
+    queryOne('#persona-id').value = '';
+    queryOne('#persona-name').value = template.name;
+    queryOne('#persona-role').value = template.role;
+    queryOne('#persona-prompt').value = template.prompt;
+    queryOne('#persona-enabled').checked = true;
+    queryOne('#persona-submit').textContent = '疑似アカウントを追加';
+    queryOne('#persona-cancel').hidden = true;
+    queryOne('#persona-name').focus();
+  }
+
+  async function savePersona(event) {
+    event.preventDefault();
+    const submit = queryOne('#persona-submit');
+    const personaId = queryOne('#persona-id').value;
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      const persona = await callApi('apiSavePersona', personaId, {
+        name: queryOne('#persona-name').value,
+        role: queryOne('#persona-role').value,
+        prompt: queryOne('#persona-prompt').value,
+        enabled: queryOne('#persona-enabled').checked
+      });
+      const index = state.personas.findIndex(item => item.id === persona.id);
+      if (index >= 0) state.personas[index] = persona;
+      else state.personas.push(persona);
+      sortPersonas();
+      renderPersonas();
+      resetPersonaForm();
+      showToast(personaId ? '疑似アカウントを更新しました。' : '疑似アカウントを追加しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+      if (!queryOne('#persona-id').value) submit.textContent = '疑似アカウントを追加';
+    }
+  }
+
+  function sortPersonas() {
+    state.personas.sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name, 'ja'));
+  }
+
+  function renderPersonas() {
+    const list = queryOne('#persona-list');
+    if (!state.personas.length) {
+      list.innerHTML = '<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">✦</span><h2>疑似アカウントはまだありません</h2><p>上のテンプレートを選ぶと、すぐに作り始められます。</p></div>';
+      return;
+    }
+    list.innerHTML = state.personas.map(persona => `
+      <article class="persona-card ${persona.enabled ? '' : 'disabled'}" data-persona-id="${escapeAttr(persona.id)}">
+        <div class="persona-card-header">
+          <div class="persona-card-title"><span class="avatar ai">${escapeHtml(initials(persona.name))}</span><div><h3>${escapeHtml(persona.name)}</h3><span class="persona-role">${escapeHtml(persona.role)}</span></div></div>
+          <span class="ai-badge">${persona.enabled ? '投稿候補' : '停止中'}</span>
+        </div>
+        <p class="persona-prompt">${escapeHtml(persona.prompt)}</p>
+        <div class="persona-actions">
+          <button class="secondary-button" type="button" data-persona-action="edit" data-id="${escapeAttr(persona.id)}">編集</button>
+          <button class="secondary-button" type="button" data-persona-action="toggle" data-id="${escapeAttr(persona.id)}">${persona.enabled ? '定時投稿から外す' : '定時投稿に戻す'}</button>
+          <button class="secondary-button" type="button" data-persona-action="delete" data-id="${escapeAttr(persona.id)}">削除</button>
+        </div>
+      </article>`).join('');
+  }
+
+  async function handlePersonaAction(event) {
+    const button = event.target.closest('[data-persona-action]');
+    if (!button) return;
+    const persona = state.personas.find(item => item.id === button.dataset.id);
+    if (!persona) return;
+    if (button.dataset.personaAction === 'edit') {
+      queryOne('#persona-id').value = persona.id;
+      queryOne('#persona-name').value = persona.name;
+      queryOne('#persona-role').value = persona.role;
+      queryOne('#persona-prompt').value = persona.prompt;
+      queryOne('#persona-enabled').checked = persona.enabled;
+      queryOne('#persona-submit').textContent = '変更を保存';
+      queryOne('#persona-cancel').hidden = false;
+      queryOne('#persona-name').focus();
+      return;
+    }
+    if (button.dataset.personaAction === 'toggle') {
+      try {
+        const updated = await callApi('apiTogglePersona', persona.id);
+        state.personas[state.personas.findIndex(item => item.id === updated.id)] = updated;
+        sortPersonas();
+        renderPersonas();
+      } catch (error) { showToast(error.message, true); }
+      return;
+    }
+    const confirmed = await confirmAction('疑似アカウントを削除しますか？', '過去の投稿は残りますが、今後この人物は選ばれません。', '削除する');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeletePersona', persona.id);
+      state.personas = state.personas.filter(item => item.id !== persona.id);
+      renderPersonas();
+      if (queryOne('#persona-id').value === persona.id) resetPersonaForm();
+      showToast('疑似アカウントを削除しました。');
+    } catch (error) { showToast(error.message, true); }
+  }
+
+  function resetPersonaForm() {
+    queryOne('#persona-form').reset();
+    queryOne('#persona-id').value = '';
+    queryOne('#persona-enabled').checked = true;
+    queryOne('#persona-submit').textContent = '疑似アカウントを追加';
+    queryOne('#persona-cancel').hidden = true;
   }
 
   async function saveSettings(event) {
@@ -723,8 +892,9 @@
   }
 
   function renderSkeletons() {
-    queryOne('#timeline').innerHTML = skeletonHtml(3);
-    queryOne('#timeline-status').textContent = '読み込み中…';
+    const targets = timelineTargets();
+    queryOne(targets.list).innerHTML = skeletonHtml(3);
+    queryOne(targets.status).textContent = '読み込み中…';
   }
 
   function skeletonHtml(count) {
@@ -741,7 +911,7 @@
 
   function renderFatalError(error) {
     state.posts = [];
-    queryOne('#timeline').innerHTML = emptyStateHtml('mySNSを開けませんでした', error.message);
+    queryOne('#timeline').innerHTML = emptyStateHtml('ぽろったーを開けませんでした', error.message);
     queryOne('#timeline-status').textContent = '';
     showToast(error.message, true);
   }

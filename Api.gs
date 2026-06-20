@@ -9,7 +9,8 @@ function apiBootstrap(filters) {
     return {
       timeline: buildTimeline_(filters || {}),
       settings: publicSettings_(readSettings_(), email),
-      discovery: buildDiscovery_()
+      discovery: buildDiscovery_(),
+      personas: listPersonas_(email)
     };
   });
 }
@@ -32,7 +33,12 @@ function apiCreatePost(payload) {
         updatedAt: timestamp,
         favorite: false,
         deletedAt: '',
-        authorEmail: email
+        authorEmail: email,
+        authorType: 'user',
+        authorId: email,
+        authorName: '',
+        sourceLabel: '',
+        sourceUrl: ''
       };
       appendRecord_(CONFIG_.SHEETS.POSTS, post);
       return presentPost_(post, 0);
@@ -205,6 +211,57 @@ function apiGetSettings() {
   });
 }
 
+function apiListPersonas() {
+  return runApi_(function (email) {
+    return listPersonas_(email);
+  });
+}
+
+function apiSavePersona(personaId, payload) {
+  return runApi_(function (email) {
+    return withScriptLock_(function () {
+      const normalized = normalizePersona_(payload || {});
+      const timestamp = nowIso_();
+      if (personaId) {
+        const persona = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
+        const patch = Object.assign({}, normalized, { updatedAt: timestamp });
+        patchRecord_(CONFIG_.SHEETS.PERSONAS, persona._row, patch);
+        return presentPersona_(Object.assign({}, persona, patch));
+      }
+      const persona = Object.assign({
+        id: makeId_(),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        authorEmail: email
+      }, normalized);
+      appendRecord_(CONFIG_.SHEETS.PERSONAS, persona);
+      return presentPersona_(persona);
+    });
+  });
+}
+
+function apiTogglePersona(personaId) {
+  return runApi_(function (email) {
+    return withScriptLock_(function () {
+      const persona = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
+      const enabled = !parseBoolean_(persona.enabled);
+      const updatedAt = nowIso_();
+      patchRecord_(CONFIG_.SHEETS.PERSONAS, persona._row, { enabled: enabled, updatedAt: updatedAt });
+      return presentPersona_(Object.assign({}, persona, { enabled: enabled, updatedAt: updatedAt }));
+    });
+  });
+}
+
+function apiDeletePersona(personaId) {
+  return runApi_(function (email) {
+    return withScriptLock_(function () {
+      const persona = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
+      deleteRecordRow_(CONFIG_.SHEETS.PERSONAS, persona._row);
+      return { id: String(persona.id) };
+    });
+  });
+}
+
 function apiSaveSettings(payload) {
   return runApi_(function (email) {
     return withScriptLock_(function () {
@@ -243,14 +300,14 @@ function apiExport(format) {
     if (normalizedFormat === 'csv') {
       return {
         format: 'csv',
-        filename: 'mySNS-posts-' + localDateKey_() + '.csv',
+        filename: 'porotter-posts-' + localDateKey_() + '.csv',
         mimeType: 'text/csv;charset=utf-8',
         content: recordsToCsv_(posts, CONFIG_.SHEETS.POSTS.headers)
       };
     }
     return {
       format: 'json',
-      filename: 'mySNS-backup-' + localDateKey_() + '.json',
+      filename: 'porotter-backup-' + localDateKey_() + '.json',
       mimeType: 'application/json;charset=utf-8',
       content: JSON.stringify({ exportedAt: nowIso_(), posts: posts, replies: replies }, null, 2)
     };
@@ -262,7 +319,7 @@ function runApi_(callback) {
     const email = assertAuthorized_();
     return { ok: true, data: callback(email) };
   } catch (error) {
-    console.error('mySNS API error: ' + String(error && error.name || 'Error'));
+    console.error('porotter API error: ' + String(error && error.name || 'Error'));
     return { ok: false, error: String(error && error.message || '処理に失敗しました。') };
   }
 }
@@ -290,7 +347,7 @@ function buildTimeline_(rawFilters) {
 
   posts = posts.filter(function (post) {
     const tags = parseTags_(post.tags);
-    const searchable = (String(post.body) + ' ' + tags.join(' ')).toLocaleLowerCase();
+    const searchable = (String(post.body) + ' ' + tags.join(' ') + ' ' + String(post.authorName || '')).toLocaleLowerCase();
     const createdDate = localDateKey_(post.createdAt);
     if (query && searchable.indexOf(query) < 0) return false;
     if (tag && !tags.some(function (item) { return item.toLocaleLowerCase() === tag; })) return false;
@@ -382,7 +439,12 @@ function presentPost_(record, replyCount) {
     updatedAt: String(record.updatedAt || record.createdAt || ''),
     favorite: parseBoolean_(record.favorite),
     deletedAt: String(record.deletedAt || ''),
-    replyCount: Number(replyCount || 0)
+    replyCount: Number(replyCount || 0),
+    authorType: String(record.authorType || 'user'),
+    authorId: String(record.authorId || ''),
+    authorName: String(record.authorName || ''),
+    sourceLabel: String(record.sourceLabel || ''),
+    sourceUrl: normalizeDriveUrl_(record.sourceUrl)
   };
 }
 
@@ -404,7 +466,32 @@ function publicSettings_(settings, email) {
     pageSize: clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE),
     maxPostLength: CONFIG_.MAX_POST_LENGTH,
     maxReplyLength: CONFIG_.MAX_REPLY_LENGTH,
-    maxTags: CONFIG_.MAX_TAGS
+    maxTags: CONFIG_.MAX_TAGS,
+    maxPersonaNameLength: CONFIG_.MAX_PERSONA_NAME_LENGTH,
+    maxPersonaRoleLength: CONFIG_.MAX_PERSONA_ROLE_LENGTH,
+    maxPersonaPromptLength: CONFIG_.MAX_PERSONA_PROMPT_LENGTH
+  };
+}
+
+function listPersonas_(email) {
+  return readRecords_(CONFIG_.SHEETS.PERSONAS)
+    .filter(function (persona) { return normalizeEmail_(persona.authorEmail) === normalizeEmail_(email); })
+    .sort(function (a, b) {
+      return Number(parseBoolean_(b.enabled)) - Number(parseBoolean_(a.enabled)) ||
+        String(a.name).localeCompare(String(b.name), 'ja');
+    })
+    .map(presentPersona_);
+}
+
+function presentPersona_(record) {
+  return {
+    id: String(record.id || ''),
+    name: String(record.name || ''),
+    role: String(record.role || ''),
+    prompt: String(record.prompt || ''),
+    enabled: parseBoolean_(record.enabled),
+    createdAt: String(record.createdAt || ''),
+    updatedAt: String(record.updatedAt || record.createdAt || '')
   };
 }
 

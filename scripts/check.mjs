@@ -15,7 +15,9 @@ for (const filename of fs.readdirSync(root).filter(name => name.endsWith('.gs'))
 }
 
 try {
-  JSON.parse(fs.readFileSync(path.join(root, 'appsscript.json'), 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'appsscript.json'), 'utf8'));
+  const workflowElements = manifest.addOns?.flows?.workflowElements || [];
+  if (workflowElements.length !== 2) errors.push('appsscript.json: expected 2 Workspace Studio custom steps');
 } catch (error) {
   errors.push(`appsscript.json: ${error.message}`);
 }
@@ -36,6 +38,16 @@ for (const partial of ['Styles', 'JavaScript']) {
 const ids = Array.from(index.matchAll(/\bid="([^"]+)"/g), match => match[1]);
 const duplicateIds = ids.filter((id, indexOfId) => ids.indexOf(id) !== indexOfId);
 if (duplicateIds.length) errors.push(`Index.html: duplicate IDs: ${[...new Set(duplicateIds)].join(', ')}`);
+
+const timelineView = index.slice(index.indexOf('id="timeline-view"'), index.indexOf('id="search-view"'));
+const searchView = index.slice(index.indexOf('id="search-view"'), index.indexOf('id="trash-view"'));
+if (timelineView.includes('id="filter-form"')) errors.push('Index.html: search form must not be inside the home timeline view');
+if (!searchView.includes('id="filter-form"') || !searchView.includes('id="search-timeline"')) {
+  errors.push('Index.html: dedicated search view is incomplete');
+}
+if (!index.includes('data-persona-template') || !clientFile.includes("callApi('apiSavePersona'")) {
+  errors.push('Persona management UI is incomplete');
+}
 
 if (errors.length) {
   console.error(errors.join('\n'));

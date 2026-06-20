@@ -1,10 +1,10 @@
 /**
- * mySNS web application entry points.
+ * ぽろったー web application entry points.
  */
 function doGet() {
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
-    .setTitle('mySNS')
+    .setTitle(CONFIG_.APP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
 }
 
@@ -16,10 +16,11 @@ function include_(filename) {
  * Run this once from the Apps Script editor before deploying the web app.
  * The effective user's email becomes the sole allowed account.
  */
-function setupMySNS() {
+function setupPorotter() {
+  migrateLegacyProperties_();
   const email = normalizeEmail_(Session.getEffectiveUser().getEmail());
   if (!email) {
-    throw new Error('Google Workspace のアカウントで setupMySNS を実行してください。');
+    throw new Error('Google Workspace のアカウントで setupPorotter を実行してください。');
   }
 
   const properties = PropertiesService.getScriptProperties();
@@ -28,6 +29,9 @@ function setupMySNS() {
 
   if (spreadsheetId) {
     spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+    if (spreadsheet.getName && spreadsheet.getName() !== CONFIG_.SPREADSHEET_NAME) {
+      spreadsheet.setName(CONFIG_.SPREADSHEET_NAME);
+    }
   } else {
     spreadsheet = SpreadsheetApp.create(CONFIG_.SPREADSHEET_NAME);
     spreadsheetId = spreadsheet.getId();
@@ -42,14 +46,15 @@ function setupMySNS() {
     allowedEmail: email,
     spreadsheetId: spreadsheetId,
     spreadsheetUrl: spreadsheet.getUrl(),
-    message: 'mySNS の初期設定が完了しました。'
+    message: 'ぽろったーの初期設定が完了しました。'
   };
 }
 
 /**
  * A safe diagnostic that intentionally does not return stored post content.
  */
-function checkMySNSSetup() {
+function checkPorotterSetup() {
+  migrateLegacyProperties_();
   const properties = PropertiesService.getScriptProperties();
   const spreadsheetId = properties.getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
   const allowedEmail = properties.getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL);

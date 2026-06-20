@@ -2,8 +2,8 @@
   const now = Date.now();
   const iso = offsetDays => new Date(now - offsetDays * 86400000).toISOString();
   let posts = [
-    { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2 },
-    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 0 },
+    { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2, authorType: 'user', authorName: '' },
+    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 0, authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
     { id: 'p3', body: '「便利にする」と「考えなくてよくする」は似ているようで違う。ここはもう少し掘りたい。', tags: ['アイデア'], createdAt: iso(9), updatedAt: iso(8), favorite: false, deletedAt: '', replyCount: 1 },
     { id: 'p4', body: '午後の集中力は、タスクの難しさより切り替え回数に削られている気がする。', tags: ['気づき'], createdAt: iso(30), updatedAt: iso(30), favorite: true, deletedAt: '', replyCount: 0 }
   ];
@@ -12,7 +12,10 @@
     { id: 'r2', postId: 'p1', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01) },
     { id: 'r3', postId: 'p3', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7) }
   ];
-  let settings = { displayName: 'わたし', email: 'me@example.com', theme: 'system', pageSize: 20, maxPostLength: 280, maxReplyLength: 280, maxTags: 5 };
+  let settings = { displayName: 'わたし', email: 'me@example.com', theme: 'system', pageSize: 20, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
+  let personas = [
+    { id: 'persona-1', name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人', prompt: '曖昧な表現や小さな抜けを丁寧に見つけます。', enabled: true, createdAt: iso(2), updatedAt: iso(2) }
+  ];
 
   const uuid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const activePosts = () => posts.filter(post => !post.deletedAt);
@@ -36,11 +39,11 @@
   const discovery = () => ({ onThisDay: null, unanswered: activePosts().find(post => !post.replyCount) || null, random: activePosts()[Math.floor(Math.random() * activePosts().length)] || null });
 
   const api = {
-    apiBootstrap: filters => ({ timeline: timeline(filters), settings, discovery: discovery() }),
+    apiBootstrap: filters => ({ timeline: timeline(filters), settings, discovery: discovery(), personas }),
     apiTimeline: filters => timeline(filters),
     apiCreatePost: payload => {
       const stamp = new Date().toISOString();
-      const post = { id: uuid('p'), body: String(payload.body).trim(), tags: payload.tags || [], createdAt: stamp, updatedAt: stamp, favorite: false, deletedAt: '', replyCount: 0 };
+      const post = { id: uuid('p'), body: String(payload.body).trim(), tags: payload.tags || [], createdAt: stamp, updatedAt: stamp, favorite: false, deletedAt: '', replyCount: 0, authorType: 'user', authorName: '' };
       if (!post.body) throw new Error('投稿を入力してください。');
       posts.push(post);
       return post;
@@ -72,8 +75,22 @@
     apiPermanentlyDeletePost: id => { posts = posts.filter(item => item.id !== id); replies = replies.filter(item => item.postId !== id); return { id }; },
     apiGetSettings: () => settings,
     apiSaveSettings: payload => { settings = { ...settings, ...payload }; return settings; },
+    apiListPersonas: () => personas,
+    apiSavePersona: (id, payload) => {
+      const stamp = new Date().toISOString();
+      if (id) {
+        const persona = personas.find(item => item.id === id);
+        Object.assign(persona, payload, { updatedAt: stamp });
+        return persona;
+      }
+      const persona = { id: uuid('persona'), ...payload, createdAt: stamp, updatedAt: stamp };
+      personas.push(persona);
+      return persona;
+    },
+    apiTogglePersona: id => { const persona = personas.find(item => item.id === id); persona.enabled = !persona.enabled; return persona; },
+    apiDeletePersona: id => { personas = personas.filter(item => item.id !== id); return { id }; },
     apiDiscovery: () => discovery(),
-    apiExport: format => ({ format, filename: `mySNS-preview.${format}`, mimeType: format === 'json' ? 'application/json' : 'text/csv', content: format === 'json' ? JSON.stringify({ posts, replies }, null, 2) : 'body\npreview' })
+    apiExport: format => ({ format, filename: `porotter-preview.${format}`, mimeType: format === 'json' ? 'application/json' : 'text/csv', content: format === 'json' ? JSON.stringify({ posts, replies, personas }, null, 2) : 'body\npreview' })
   };
 
   let successHandler = () => {};

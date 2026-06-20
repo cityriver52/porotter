@@ -1,9 +1,9 @@
 {
-  "name": "mysns",
+  "name": "porotter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A private, SNS-style memo app built entirely with Google Apps Script.",
+  "description": "Porotter: a private, SNS-style memo app built with Google Apps Script and Google Workspace Studio.",
   "scripts": {
     "check": "node scripts/check.mjs",
     "test": "node --test tests/*.test.mjs",

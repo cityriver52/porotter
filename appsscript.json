@@ -3,6 +3,54 @@
   "dependencies": {},
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
+  "addOns": {
+    "common": {
+      "name": "ぽろったー / porotter",
+      "logoUrl": "https://www.gstatic.com/images/icons/material/system/2x/forum_googblue_48dp.png",
+      "useLocaleFromApp": true
+    },
+    "flows": {
+      "workflowElements": [
+        {
+          "id": "pickPorotterPersona",
+          "state": "ACTIVE",
+          "name": "疑似アカウントをランダムに選ぶ",
+          "description": "有効なぽろったー疑似アカウントを1件選び、Gemini用のプロンプトを返します。",
+          "workflowAction": {
+            "inputs": [],
+            "outputs": [
+              { "id": "personaId", "description": "疑似アカウントID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "personaName", "description": "表示名", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "personaRole", "description": "役割", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "personaPrompt", "description": "パーソナリティ", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "generationPrompt", "description": "Gemini用プロンプト", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
+            ],
+            "onConfigFunction": "onConfigPickPorotterPersona",
+            "onExecuteFunction": "onExecutePickPorotterPersona"
+          }
+        },
+        {
+          "id": "publishPorotterPost",
+          "state": "ACTIVE",
+          "name": "ぽろったーへ投稿する",
+          "description": "Geminiの回答を選択した疑似アカウントの投稿として保存します。",
+          "workflowAction": {
+            "inputs": [
+              { "id": "personaId", "description": "疑似アカウントID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "generatedText", "description": "Geminiの回答", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
+            ],
+            "outputs": [
+              { "id": "postId", "description": "投稿ID", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "authorName", "description": "投稿者名", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } },
+              { "id": "body", "description": "投稿本文", "cardinality": "SINGLE", "dataType": { "basicType": "STRING" } }
+            ],
+            "onConfigFunction": "onConfigPublishPorotterPost",
+            "onExecuteFunction": "onExecutePublishPorotterPost"
+          }
+        }
+      ]
+    }
+  },
   "webapp": {
     "access": "DOMAIN",
     "executeAs": "USER_ACCESSING"

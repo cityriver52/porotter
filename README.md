@@ -1,11 +1,14 @@
-# mySNS
+# ぽろったー（porotter）
 
-仕事の中で生まれた気づきや違和感を、外部SNSへ公開せずに残すための個人用メモアプリです。Xのような短文タイムラインと返信スレッドを、Google Apps ScriptとGoogleスプレッドシートだけで動かします。
+仕事の中で生まれた気づきや違和感を、外部SNSへ公開せずに残すための個人用メモアプリです。Xのような短文タイムラインと返信スレッドを、Google Apps Script、Googleスプレッドシート、Google Workspace Studioで動かします。
 
 ## 初期版でできること
 
 - 280文字までの短文投稿
 - 投稿・返信内のURLを自動でハイパーリンク化
+- ホームと分離された検索画面
+- 疑似アカウントの作成・編集・停止
+- Workspace StudioとGeminiによる定時のAI投稿
 - タグ付けとタグ絞り込み
 - キーワード、日付、返信有無による検索
 - 自分の投稿への返信
@@ -18,11 +21,11 @@
 - PC・スマートフォン対応
 - Google Workspaceアカウントによる本人限定アクセス
 
-外部API、CDN、アクセス解析、生成AIは使用していません。投稿本文をアプリのログへ出力する処理もありません。
+外部API、CDN、アクセス解析は使用しません。AI投稿だけはGoogle Workspace Studio内のGeminiを使用し、結果を同じApps Scriptとスプレッドシートへ保存します。投稿本文をアプリのログへ出力する処理はありません。
 
 ## 導入済み環境
 
-- [mySNSウェブアプリ](https://script.google.com/macros/s/AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4gLFz3vs3Zl_rHDS0bSPOLm-3sukeAmurPJw/exec)
+- [ぽろったー ウェブアプリ](https://script.google.com/macros/s/AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4gLFz3vs3Zl_rHDS0bSPOLm-3sukeAmurPJw/exec)
 - [Apps Scriptプロジェクト](https://script.google.com/d/1uB3yERLAOsqqWxrumc8xdT7RnucxyAWPtZ3QC3XSX2nFJ_keevE9UVf0/edit)
 
 ローカルの `.clasp.json` にGASプロジェクトとの紐付けを保存しています。スクリプトIDをGitHubへ固定しない方針のため、このファイルはGit管理対象外です。
@@ -36,7 +39,13 @@
        └─ Googleスプレッドシート
             ├─ Posts
             ├─ Replies
+            ├─ Personas
             └─ Settings
+
+Workspace Studio（定時実行）
+  ├─ 疑似アカウントをランダム選択
+  ├─ Geminiが最近のDrive内容から短文を生成
+  └─ Apps ScriptカスタムステップでPostsへ保存
 ```
 
 スプレッドシートの行番号はIDに使わず、投稿と返信にはUUIDを割り当てます。削除はまず論理削除として扱い、ごみ箱から完全削除したときだけ行を取り除きます。
@@ -45,7 +54,7 @@
 
 ### 1. Apps Scriptプロジェクトを用意する
 
-[Google Apps Script](https://script.google.com/)で新しいスタンドアロンプロジェクトを作成し、プロジェクト名を `mySNS` にします。
+[Google Apps Script](https://script.google.com/)で新しいスタンドアロンプロジェクトを作成し、プロジェクト名を `porotter` にします。
 
 ファイルの反映には `clasp` を使う方法が簡単です。
 
@@ -70,11 +79,11 @@ npx @google/clasp push
 
 ### 2. 保存先と利用者を初期化する
 
-Apps Scriptエディタ上部の関数選択で `setupMySNS` を選び、実行します。初回だけGoogleの権限確認が表示されます。
+Apps Scriptエディタ上部の関数選択で `setupPorotter` を選び、実行します。初回だけGoogleの権限確認が表示されます。
 
 この処理は次を行います。
 
-- `mySNS Data` スプレッドシートをマイドライブに作成
+- `porotter Data` スプレッドシートをマイドライブに作成
 - `Posts`、`Replies`、`Settings`シートを作成
 - 実行したGoogle Workspaceアカウントを唯一の利用許可アカウントとして保存
 
@@ -108,6 +117,10 @@ npx @google/clasp deploy --deploymentId AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4g
 ```
 
 既存のスプレッドシートIDと利用許可アカウントはScript Propertiesに残るため、通常のコード更新で再設定は不要です。
+
+## Workspace StudioによるAI投稿
+
+疑似アカウントを設定画面で作成した後、[Workspace Studio設定ガイド](WORKSPACE_STUDIO.md)に沿って定時フローを作成します。外部APIやWebhookは不要です。
 
 ## ローカル確認
 

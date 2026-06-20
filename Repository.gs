@@ -1,9 +1,14 @@
 function getSpreadsheet_() {
+  migrateLegacyProperties_();
   const id = PropertiesService.getScriptProperties().getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
   if (!id) {
-    throw new Error('保存先が設定されていません。setupMySNS を実行してください。');
+    throw new Error('保存先が設定されていません。setupPorotter を実行してください。');
   }
-  return SpreadsheetApp.openById(id);
+  const spreadsheet = SpreadsheetApp.openById(id);
+  if (spreadsheet.getName && spreadsheet.getName() !== CONFIG_.SPREADSHEET_NAME) {
+    spreadsheet.setName(CONFIG_.SPREADSHEET_NAME);
+  }
+  return spreadsheet;
 }
 
 function ensureSchema_(spreadsheet) {
@@ -23,9 +28,7 @@ function ensureSchema_(spreadsheet) {
       }
     });
 
-    if (sheet.getLastRow() === 0 || !currentHeaders[0]) {
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    }
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, headers.length)
       .setFontWeight('bold')
@@ -33,7 +36,7 @@ function ensureSchema_(spreadsheet) {
   });
 
   const defaultSheet = spreadsheet.getSheetByName('シート1') || spreadsheet.getSheetByName('Sheet1');
-  if (defaultSheet && spreadsheet.getSheets().length > 3 && defaultSheet.getLastRow() === 0) {
+  if (defaultSheet && spreadsheet.getSheets().length > Object.keys(CONFIG_.SHEETS).length && defaultSheet.getLastRow() === 0) {
     spreadsheet.deleteSheet(defaultSheet);
   }
 }

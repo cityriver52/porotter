@@ -4,7 +4,7 @@
     <base target="_top">
     <meta charset="UTF-8">
     <meta name="color-scheme" content="light dark">
-    <title>mySNS</title>
+    <title>ぽろったー</title>
     <?!= include_('Styles'); ?>
   </head>
   <body>
@@ -12,14 +12,17 @@
 
     <div id="app" class="app-shell" aria-busy="true">
       <aside class="side-nav" aria-label="メインメニュー">
-        <div class="brand" aria-label="mySNS">
-          <span class="brand-mark" aria-hidden="true">m</span>
-          <span class="brand-name">mySNS</span>
+        <div class="brand" aria-label="ぽろったー">
+          <span class="brand-mark" aria-hidden="true">ぽ</span>
+          <span class="brand-name">ぽろったー</span>
         </div>
 
         <nav class="nav-list">
           <button class="nav-item active" type="button" data-view="timeline" aria-current="page">
             <span aria-hidden="true">⌂</span><span>ホーム</span>
+          </button>
+          <button class="nav-item" type="button" data-view="search">
+            <span aria-hidden="true">⌕</span><span>検索</span>
           </button>
           <button class="nav-item" type="button" data-view="favorites">
             <span aria-hidden="true">♡</span><span>お気に入り</span>
@@ -80,7 +83,18 @@
             </form>
           </section>
 
-          <section class="filter-section" aria-label="投稿を検索">
+          <div id="timeline-status" class="timeline-status" role="status" aria-live="polite"></div>
+          <div id="timeline" class="timeline" aria-label="投稿一覧"></div>
+          <div class="load-more-wrap">
+            <button id="load-more" class="secondary-button" type="button" hidden>さらに読み込む</button>
+          </div>
+        </section>
+
+        <section id="search-view" class="view-panel" data-view-panel="search" hidden>
+          <header class="column-header">
+            <div><p class="eyebrow">FIND YOUR THOUGHTS</p><h1>検索</h1></div>
+          </header>
+          <section class="filter-section search-page-filters" aria-label="投稿を検索">
             <form id="filter-form" class="filter-form">
               <label class="search-box" for="search-input">
                 <span aria-hidden="true">⌕</span>
@@ -104,11 +118,10 @@
             <div id="active-filter-summary" class="active-filter-summary" aria-live="polite"></div>
             <div id="tag-filter-list" class="tag-filter-list" aria-label="タグで絞り込む"></div>
           </section>
-
-          <div id="timeline-status" class="timeline-status" role="status" aria-live="polite"></div>
-          <div id="timeline" class="timeline" aria-label="投稿一覧"></div>
+          <div id="search-timeline-status" class="timeline-status" role="status" aria-live="polite"></div>
+          <div id="search-timeline" class="timeline" aria-label="検索結果"></div>
           <div class="load-more-wrap">
-            <button id="load-more" class="secondary-button" type="button" hidden>さらに読み込む</button>
+            <button id="search-load-more" class="secondary-button" type="button" hidden>さらに読み込む</button>
           </div>
         </section>
 
@@ -161,6 +174,36 @@
               </div>
             </div>
           </section>
+
+          <section class="settings-card persona-settings-card">
+            <div class="settings-section">
+              <div class="settings-heading-row">
+                <div>
+                  <h2>疑似アカウント</h2>
+                  <p>Workspace Studioが投稿するときの視点と口調を設定します。</p>
+                </div>
+                <span class="ai-badge">AI</span>
+              </div>
+              <div class="persona-templates" aria-label="疑似アカウントのテンプレート">
+                <button class="template-chip" type="button" data-persona-template="finance">財務経理担当</button>
+                <button class="template-chip" type="button" data-persona-template="project">このプロジェクトの担当</button>
+                <button class="template-chip" type="button" data-persona-template="wild">突飛なアイデアを出す人</button>
+                <button class="template-chip" type="button" data-persona-template="careful">まじめで細やかな人</button>
+              </div>
+              <form id="persona-form" class="persona-form">
+                <input id="persona-id" type="hidden">
+                <label>表示名<input id="persona-name" type="text" maxlength="40" placeholder="例：経理の佐藤さん" required></label>
+                <label>役割<input id="persona-role" type="text" maxlength="80" placeholder="例：財務経理担当" required></label>
+                <label>パーソナリティ<textarea id="persona-prompt" rows="4" maxlength="1000" placeholder="気づいてほしい観点や口調を具体的に記載" required></textarea></label>
+                <label class="checkbox-label"><input id="persona-enabled" type="checkbox" checked> 定時投稿の候補に含める</label>
+                <div class="button-row">
+                  <button id="persona-submit" class="primary-button" type="submit">疑似アカウントを追加</button>
+                  <button id="persona-cancel" class="secondary-button" type="button" hidden>編集をやめる</button>
+                </div>
+              </form>
+              <div id="persona-list" class="persona-list" aria-live="polite"></div>
+            </div>
+          </section>
         </section>
       </main>
 
@@ -180,6 +223,7 @@
 
     <nav class="mobile-nav" aria-label="モバイルメニュー">
       <button class="active" type="button" data-view="timeline"><span aria-hidden="true">⌂</span><small>ホーム</small></button>
+      <button type="button" data-view="search"><span aria-hidden="true">⌕</span><small>検索</small></button>
       <button type="button" data-view="favorites"><span aria-hidden="true">♡</span><small>お気に入り</small></button>
       <button id="mobile-compose-button" class="mobile-compose-button" type="button" aria-label="新しい投稿">＋</button>
       <button type="button" data-view="trash"><span aria-hidden="true">♲</span><small>ごみ箱</small></button>
@@ -214,7 +258,7 @@
     </dialog>
 
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <div id="initial-loader" class="initial-loader" role="status"><span class="loader-mark">m</span><span>タイムラインを準備しています…</span></div>
+    <div id="initial-loader" class="initial-loader" role="status"><span class="loader-mark">ぽ</span><span>ぽろったーを準備しています…</span></div>
 
     <?!= include_('JavaScript'); ?>
   </body>
