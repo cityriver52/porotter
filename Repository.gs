@@ -28,11 +28,16 @@ function ensureSchema_(spreadsheet) {
       }
     });
 
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
-    sheet.getRange(1, 1, 1, headers.length)
-      .setFontWeight('bold')
-      .setBackground('#e8f3ff');
+    const headersNeedWrite = headers.some(function (header, index) {
+      return currentHeaders[index] !== header;
+    });
+    if (headersNeedWrite) {
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+      sheet.getRange(1, 1, 1, headers.length)
+        .setFontWeight('bold')
+        .setBackground('#e8f3ff');
+    }
   });
 
   const defaultSheet = spreadsheet.getSheetByName('シート1') || spreadsheet.getSheetByName('Sheet1');
@@ -59,13 +64,17 @@ function readRecords_(definition) {
   const headers = definition.headers.slice();
   const values = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
   return values.map(function (row, rowIndex) {
-    const record = { _row: rowIndex + 2 };
-    headers.forEach(function (header, columnIndex) {
-      const value = row[columnIndex];
-      record[header] = value instanceof Date ? value.toISOString() : value;
-    });
-    return record;
+    return recordFromRow_(headers, row, rowIndex + 2);
   });
+}
+
+function recordFromRow_(headers, row, rowNumber) {
+  const record = { _row: rowNumber };
+  headers.forEach(function (header, columnIndex) {
+    const value = row[columnIndex];
+    record[header] = value instanceof Date ? value.toISOString() : value;
+  });
+  return record;
 }
 
 function appendRecord_(definition, record) {
@@ -78,6 +87,19 @@ function appendRecord_(definition, record) {
 }
 
 function findRecordById_(definition, id) {
+  const sheet = getSheet_(definition.name);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('対象のデータが見つかりません。');
+
+  const idRange = sheet.getRange(2, 1, lastRow - 1, 1);
+  if (idRange.createTextFinder) {
+    const found = idRange.createTextFinder(String(id)).matchEntireCell(true).findNext();
+    if (!found) throw new Error('対象のデータが見つかりません。');
+    const rowNumber = found.getRow();
+    const row = sheet.getRange(rowNumber, 1, 1, definition.headers.length).getValues()[0];
+    return recordFromRow_(definition.headers, row, rowNumber);
+  }
+
   const record = readRecords_(definition).find(function (item) {
     return String(item.id) === String(id);
   });
@@ -88,10 +110,22 @@ function findRecordById_(definition, id) {
 function patchRecord_(definition, rowNumber, patch) {
   const sheet = getSheet_(definition.name);
   const headers = definition.headers;
-  Object.keys(patch).forEach(function (key) {
-    const column = headers.indexOf(key);
-    if (column >= 0) sheet.getRange(rowNumber, column + 1).setValue(patch[key]);
+  const keys = Object.keys(patch).filter(function (key) {
+    return headers.indexOf(key) >= 0;
   });
+  if (!keys.length) return;
+  if (keys.length === 1) {
+    const column = headers.indexOf(keys[0]);
+    sheet.getRange(rowNumber, column + 1).setValue(patch[keys[0]]);
+    return;
+  }
+
+  const range = sheet.getRange(rowNumber, 1, 1, headers.length);
+  const row = range.getValues()[0];
+  keys.forEach(function (key) {
+    row[headers.indexOf(key)] = patch[key];
+  });
+  range.setValues([row]);
 }
 
 function deleteRecordRow_(definition, rowNumber) {
@@ -106,23 +140,30 @@ function readSettings_() {
   }, {});
 }
 
-function writeSetting_(key, value) {
+function writeSettings_(updates) {
   const definition = CONFIG_.SHEETS.SETTINGS;
-  const existing = readRecords_(definition).find(function (record) {
-    return String(record.key) === key;
-  });
+  const existingByKey = readRecords_(definition).reduce(function (records, record) {
+    records[String(record.key)] = record;
+    return records;
+  }, {});
   const timestamp = nowIso_();
 
-  if (existing) {
-    patchRecord_(definition, existing._row, { value: String(value), updatedAt: timestamp });
-  } else {
-    appendRecord_(definition, { key: key, value: String(value), updatedAt: timestamp });
-  }
+  Object.keys(updates).forEach(function (key) {
+    const existing = existingByKey[key];
+    const value = String(updates[key]);
+    if (existing) {
+      patchRecord_(definition, existing._row, { value: value, updatedAt: timestamp });
+    } else {
+      appendRecord_(definition, { key: key, value: value, updatedAt: timestamp });
+    }
+  });
 }
 
 function ensureDefaultSettings_(email) {
   const settings = readSettings_();
-  if (!settings.displayName) writeSetting_('displayName', email.split('@')[0]);
-  if (!settings.theme) writeSetting_('theme', 'system');
-  if (!settings.pageSize) writeSetting_('pageSize', String(CONFIG_.DEFAULT_PAGE_SIZE));
+  const defaults = {};
+  if (!settings.displayName) defaults.displayName = email.split('@')[0];
+  if (!settings.theme) defaults.theme = 'system';
+  if (!settings.pageSize) defaults.pageSize = String(CONFIG_.DEFAULT_PAGE_SIZE);
+  if (Object.keys(defaults).length) writeSettings_(defaults);
 }

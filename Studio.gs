@@ -68,22 +68,16 @@ function onExecutePublishPorotterPost(event) {
   }
   const persona = presentPersona_(personaRecord);
   const generated = parseGeneratedPost_(generatedText);
-  const timestamp = nowIso_();
-  const post = {
-    id: makeId_(),
-    body: normalizeBody_(generated.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
-    tags: JSON.stringify(normalizeTags_(generated.tags)),
-    createdAt: timestamp,
-    updatedAt: timestamp,
-    favorite: false,
-    deletedAt: '',
-    authorEmail: email,
+  const post = createPostRecord_({
+    email: email,
+    body: generated.body,
+    tags: generated.tags,
     authorType: 'persona',
     authorId: persona.id,
     authorName: persona.name,
     sourceLabel: generated.sourceLabel,
     sourceUrl: generated.sourceUrl
-  };
+  });
   appendRecord_(CONFIG_.SHEETS.POSTS, post);
   return studioOutputVariables_({
     postId: studioStringValue_(post.id),

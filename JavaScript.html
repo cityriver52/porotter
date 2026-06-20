@@ -8,15 +8,7 @@
     personas: [],
     posts: [],
     tags: [],
-    filters: {
-      query: '',
-      tag: '',
-      startDate: '',
-      endDate: '',
-      replyState: '',
-      favoriteOnly: false,
-      offset: 0
-    },
+    filters: createFilters('timeline'),
     hasMore: false,
     total: 0,
     currentView: 'timeline',
@@ -25,7 +17,8 @@
     editTarget: null,
     confirmResolver: null,
     loadingTimeline: false,
-    dailyPrompt: null
+    dailyPrompt: null,
+    tagSuggestionIndex: { post: -1, search: -1 }
   };
 
   const queryOne = (selector, root = document) => root.querySelector(selector);
@@ -74,11 +67,7 @@
       const data = await callApi('apiBootstrap', state.filters);
       state.settings = data.settings;
       state.personas = data.personas || [];
-      state.posts = data.timeline.posts;
-      state.tags = data.timeline.tags;
-      state.hasMore = data.timeline.hasMore;
-      state.total = data.timeline.total;
-      state.filters.offset = data.timeline.nextOffset;
+      applyTimelineData(data.timeline, false);
       applySettings();
       renderTimeline();
       renderTagFilters();
@@ -95,13 +84,14 @@
   function bindEvents() {
     queryOne('#post-form').addEventListener('submit', createPost);
     queryOne('#post-body').addEventListener('input', () => updateCount('#post-body', '#post-count'));
-    queryOne('#post-tags').addEventListener('input', syncQuickTagsFromInput);
+    bindTagAutocomplete('post', syncQuickTagsFromInput);
     queryOne('#quick-tags').addEventListener('click', toggleQuickTag);
 
     queryOne('#filter-form').addEventListener('submit', applyFilters);
     queryOne('#filter-toggle').addEventListener('click', toggleAdvancedFilters);
     queryOne('#clear-filters').addEventListener('click', clearFilters);
     queryOne('#tag-filter-list').addEventListener('click', filterByTag);
+    bindTagAutocomplete('search');
     queryOne('#load-more').addEventListener('click', () => loadTimeline(true));
     queryOne('#search-load-more').addEventListener('click', () => loadTimeline(true));
 
@@ -129,6 +119,9 @@
     queryOne('#persona-cancel').addEventListener('click', resetPersonaForm);
     queryOne('.persona-templates').addEventListener('click', applyPersonaTemplate);
     queryOne('#persona-list').addEventListener('click', handlePersonaAction);
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.tag-autocomplete')) closeTagSuggestions();
+    });
     queryAll('[data-export]').forEach(button => button.addEventListener('click', () => exportData(button.dataset.export, button)));
 
     queryOne('#confirm-cancel').addEventListener('click', () => resolveConfirmation(false));
@@ -201,6 +194,26 @@
     return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : value.slice(0, 2)).toUpperCase();
   }
 
+  function createFilters(view) {
+    return {
+      query: '',
+      tag: '',
+      startDate: '',
+      endDate: '',
+      replyState: '',
+      favoriteOnly: view === 'favorites',
+      offset: 0
+    };
+  }
+
+  function applyTimelineData(data, append) {
+    state.posts = append ? state.posts.concat(data.posts) : data.posts;
+    state.tags = data.tags;
+    state.total = data.total;
+    state.hasMore = data.hasMore;
+    state.filters.offset = data.nextOffset;
+  }
+
   async function createPost(event) {
     event.preventDefault();
     const submit = queryOne('#post-submit');
@@ -254,6 +267,125 @@
       });
   }
 
+  function normalizeSingleTag(value) {
+    return parseTagInput(value)[0] || '';
+  }
+
+  function currentTagFragment(value, multiple) {
+    const text = String(value || '');
+    if (!multiple) return text.replace(/^#+/, '').trim();
+    let start = text.length;
+    while (start > 0 && !/[\s,、]/.test(text[start - 1])) start -= 1;
+    return text.slice(start).replace(/^#+/, '').trim();
+  }
+
+  function replaceCurrentTag(value, tag, multiple) {
+    if (!multiple) return '#' + tag;
+    const text = String(value || '');
+    let start = text.length;
+    while (start > 0 && !/[\s,、]/.test(text[start - 1])) start -= 1;
+    return text.slice(0, start) + '#' + tag + ' ';
+  }
+
+  function matchingTags(tags, query, excluded) {
+    const needle = String(query || '').toLocaleLowerCase();
+    const excludedKeys = new Set((excluded || []).map(item => String(item).toLocaleLowerCase()));
+    return (tags || [])
+      .filter(tag => !excludedKeys.has(String(tag.name).toLocaleLowerCase()))
+      .filter(tag => !needle || String(tag.name).toLocaleLowerCase().includes(needle))
+      .sort((a, b) => {
+        const aName = String(a.name).toLocaleLowerCase();
+        const bName = String(b.name).toLocaleLowerCase();
+        const aStarts = needle && aName.startsWith(needle) ? 1 : 0;
+        const bStarts = needle && bName.startsWith(needle) ? 1 : 0;
+        return bStarts - aStarts || Number(b.count || 0) - Number(a.count || 0) || String(a.name).localeCompare(String(b.name), 'ja');
+      })
+      .slice(0, 8);
+  }
+
+  function tagAutocompleteConfig(mode) {
+    return mode === 'post'
+      ? { input: '#post-tags', list: '#post-tag-suggestions', multiple: true }
+      : { input: '#search-tag', list: '#search-tag-suggestions', multiple: false };
+  }
+
+  function bindTagAutocomplete(mode, onInput) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    const list = queryOne(config.list);
+    input.addEventListener('input', () => {
+      if (onInput) onInput();
+      renderTagSuggestions(mode);
+    });
+    input.addEventListener('focus', () => renderTagSuggestions(mode));
+    input.addEventListener('keydown', event => handleTagSuggestionKeys(event, mode));
+    list.addEventListener('mousedown', event => event.preventDefault());
+    list.addEventListener('click', event => selectTagSuggestion(event, mode));
+  }
+
+  function renderTagSuggestions(mode) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    const list = queryOne(config.list);
+    const query = currentTagFragment(input.value, config.multiple);
+    const excluded = config.multiple ? parseTagInput(input.value).filter(tag => tag.toLocaleLowerCase() !== query.toLocaleLowerCase()) : [];
+    const matches = matchingTags(state.tags, query, excluded);
+    state.tagSuggestionIndex[mode] = -1;
+    list.innerHTML = matches.map(tag => `
+      <button type="button" role="option" data-tag-suggestion="${escapeAttr(tag.name)}">
+        <span>#${escapeHtml(tag.name)}</span><small>${Number(tag.count || 0)}件</small>
+      </button>`).join('');
+    list.hidden = matches.length === 0;
+    input.setAttribute('aria-expanded', String(matches.length > 0));
+  }
+
+  function closeTagSuggestions(mode) {
+    const modes = mode ? [mode] : ['post', 'search'];
+    modes.forEach(item => {
+      const config = tagAutocompleteConfig(item);
+      queryOne(config.list).hidden = true;
+      queryOne(config.input).setAttribute('aria-expanded', 'false');
+      state.tagSuggestionIndex[item] = -1;
+    });
+  }
+
+  function chooseTagSuggestion(mode, tag) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    input.value = replaceCurrentTag(input.value, tag, config.multiple);
+    if (mode === 'post') syncQuickTagsFromInput();
+    closeTagSuggestions(mode);
+    input.focus();
+  }
+
+  function selectTagSuggestion(event, mode) {
+    const button = event.target.closest('[data-tag-suggestion]');
+    if (button) chooseTagSuggestion(mode, button.dataset.tagSuggestion);
+  }
+
+  function handleTagSuggestionKeys(event, mode) {
+    const config = tagAutocompleteConfig(mode);
+    const list = queryOne(config.list);
+    if (event.key === 'Escape') return closeTagSuggestions(mode);
+    if (list.hidden && event.key === 'ArrowDown') renderTagSuggestions(mode);
+    const options = queryAll('[data-tag-suggestion]', list);
+    if (!options.length) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      state.tagSuggestionIndex[mode] = (state.tagSuggestionIndex[mode] + direction + options.length) % options.length;
+      options.forEach((option, index) => {
+        const active = index === state.tagSuggestionIndex[mode];
+        option.classList.toggle('active', active);
+        option.setAttribute('aria-selected', String(active));
+      });
+      options[state.tagSuggestionIndex[mode]].scrollIntoView({ block: 'nearest' });
+    } else if (event.key === 'Enter' && state.tagSuggestionIndex[mode] >= 0) {
+      event.preventDefault();
+      chooseTagSuggestion(mode, options[state.tagSuggestionIndex[mode]].dataset.tagSuggestion);
+    }
+  }
+
   async function applyFilters(event) {
     event.preventDefault();
     readFilterControls();
@@ -262,6 +394,7 @@
 
   function readFilterControls() {
     state.filters.query = queryOne('#search-input').value.trim();
+    state.filters.tag = normalizeSingleTag(queryOne('#search-tag').value);
     state.filters.startDate = queryOne('#start-date').value;
     state.filters.endDate = queryOne('#end-date').value;
     state.filters.replyState = queryOne('#reply-state').value;
@@ -279,7 +412,7 @@
     queryOne('#start-date').value = '';
     queryOne('#end-date').value = '';
     queryOne('#reply-state').value = '';
-    state.filters = { query: '', tag: '', startDate: '', endDate: '', replyState: '', favoriteOnly: state.currentView === 'favorites', offset: 0 };
+    state.filters = createFilters(state.currentView);
     await loadTimeline(false);
   }
 
@@ -290,6 +423,8 @@
       await switchView('search', false);
     }
     state.filters.tag = state.filters.tag === button.dataset.filterTag ? '' : button.dataset.filterTag;
+    queryOne('#search-tag').value = state.filters.tag ? '#' + state.filters.tag : '';
+    closeTagSuggestions('search');
     state.filters.offset = 0;
     await loadTimeline(false);
   }
@@ -312,11 +447,7 @@
     }
     try {
       const data = await callApi('apiTimeline', state.filters);
-      state.posts = append ? state.posts.concat(data.posts) : data.posts;
-      state.tags = data.tags;
-      state.total = data.total;
-      state.hasMore = data.hasMore;
-      state.filters.offset = data.nextOffset;
+      applyTimelineData(data, append);
       renderTimeline();
       renderTagFilters();
     } catch (error) {
@@ -621,10 +752,7 @@
 
     if (timelineVisible) {
       queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : 'ホーム';
-      state.filters = {
-        query: '', tag: '', startDate: '', endDate: '', replyState: '',
-        favoriteOnly: view === 'favorites', offset: 0
-      };
+      state.filters = createFilters(view);
       if (load) await loadTimeline(false);
     } else if (view === 'search') {
       state.filters.favoriteOnly = false;
