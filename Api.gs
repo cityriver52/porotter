@@ -418,7 +418,7 @@ function presentPost_(record, replyCount) {
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || ''),
     sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeDriveUrl_(record.sourceUrl)
+    sourceUrl: normalizeWorkspaceUrl_(record.sourceUrl)
   };
 }
 

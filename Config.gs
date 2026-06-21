@@ -168,9 +168,9 @@ function isValidDateInput_(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
 
-function normalizeDriveUrl_(value) {
+function normalizeWorkspaceUrl_(value) {
   const url = String(value || '').trim();
-  return /^https:\/\/(?:drive|docs)\.google\.com\//i.test(url) ? url : '';
+  return /^https:\/\/(?:drive|docs|mail|chat)\.google\.com\//i.test(url) ? url : '';
 }
 
 function normalizePersona_(payload) {

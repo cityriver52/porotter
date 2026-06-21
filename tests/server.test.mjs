@@ -144,14 +144,20 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   const picked = app.onExecutePickPorotterPersona();
   const pickedMap = picked.hostAppAction.workflowAction.variableDataMap;
   assert.equal(pickedMap.personaId.stringValues[0], saved.data.id);
-  assert.match(pickedMap.generationPrompt.stringValues[0], /過去7日/);
+  const generationPrompt = pickedMap.generationPrompt.stringValues[0];
+  assert.match(generationPrompt, /過去7日/);
+  assert.match(generationPrompt, /Google Drive/);
+  assert.match(generationPrompt, /Gmail/);
+  assert.match(generationPrompt, /Google Chat/);
+  assert.match(generationPrompt, /フォローしていないスレッドへの返信を必ず無視/);
+  assert.match(generationPrompt, /フォロー状態を確認できない返信も対象外/);
 
   const published = app.onExecutePublishPorotterPost({
     workflow: {
       actionInvocation: {
         inputs: {
           personaId: { stringValues: [saved.data.id] },
-          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の予算資料', sourceUrl: '' })] }
+          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の連絡', sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/example' })] }
         }
       }
     }
@@ -161,6 +167,9 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.equal(timeline.data.total, 1);
   assert.equal(timeline.data.posts[0].authorType, 'persona');
   assert.equal(timeline.data.posts[0].authorName, '経理の見張り番');
+  assert.equal(timeline.data.posts[0].sourceUrl, 'https://mail.google.com/mail/u/0/#inbox/example');
+  assert.equal(app.normalizeWorkspaceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
+  assert.equal(app.normalizeWorkspaceUrl_('https://evil.example/?next=https://mail.google.com/'), '');
 
   assert.equal(app.apiTogglePersona(saved.data.id).data.enabled, false);
   assert.equal(app.apiDeletePersona(saved.data.id).ok, true);
@@ -183,6 +192,7 @@ test('Workspace Studio replies about one third of the time and lets Gemini choos
   assert.equal(replyActivity.type, 'reply-choice');
   assert.ok(replyActivity.context.candidatePostIds.includes(first.id));
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
+  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
   assert.equal(app.chooseStudioActivity_('owner@example.com', persona, 0.34).type, 'post');
 
   const published = app.onExecutePublishPorotterPost({
@@ -236,7 +246,10 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   assert.equal(priorityActivity.type, 'reply-to-user');
   assert.equal(priorityActivity.context.postId, aiPostId);
   assert.equal(priorityActivity.context.parentReplyId, userReply.id);
-  assert.match(app.buildPersonaGenerationPrompt_(persona, priorityActivity), /ユーザーから届いた返信/);
+  const priorityPrompt = app.buildPersonaGenerationPrompt_(persona, priorityActivity);
+  assert.match(priorityPrompt, /ユーザーから届いた返信/);
+  assert.match(priorityPrompt, /Gmail/);
+  assert.match(priorityPrompt, /フォロー状態を確認できない返信も対象外/);
 
   app.onExecutePublishPorotterPost({
     workflow: {

@@ -102,6 +102,8 @@
 
     queryOne('#timeline').addEventListener('click', handleTimelineAction);
     queryOne('#search-timeline').addEventListener('click', handleTimelineAction);
+    queryOne('#timeline').addEventListener('keydown', handleTimelineKeydown);
+    queryOne('#search-timeline').addEventListener('keydown', handleTimelineKeydown);
     queryOne('#trash-list').addEventListener('click', handleTrashAction);
     queryOne('#discovery-list').addEventListener('click', handleDiscoveryAction);
     queryOne('#refresh-discovery').addEventListener('click', refreshDiscovery);
@@ -469,7 +471,7 @@
         filtered ? '検索条件を変えると、別の思考が見つかるかもしれません。' : '大きな気づきでなくても大丈夫。今日の小さな感触から始められます。'
       );
     } else {
-      timeline.innerHTML = state.posts.map(post => postHtml(post)).join('');
+      timeline.innerHTML = state.posts.map(post => postHtml(post, { threadOpenable: true })).join('');
     }
     queryOne(targets.status).textContent = state.total ? `${state.total}件の投稿` : '';
     queryOne(targets.loadMore).hidden = !state.hasMore;
@@ -482,10 +484,11 @@
     const isPersona = post.authorType === 'persona';
     const authorName = isPersona ? (post.authorName || 'AIアカウント') : (state.settings && state.settings.displayName || 'me');
     const sourceHtml = post.sourceLabel || post.sourceUrl
-      ? `<div class="post-source">参照：${post.sourceUrl ? `<a href="${escapeAttr(post.sourceUrl)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(post.sourceLabel || 'Google Drive')}</a>` : escapeHtml(post.sourceLabel)}</div>`
+      ? `<div class="post-source">参照：${post.sourceUrl ? `<a href="${escapeAttr(post.sourceUrl)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(post.sourceLabel || 'Google Workspace')}</a>` : escapeHtml(post.sourceLabel)}</div>`
       : '';
+    const threadOpenable = Boolean(options.threadOpenable && !deleted);
     return `
-      <article class="post-card ${options.threadRoot ? 'thread-root' : ''}" data-post-id="${escapeAttr(post.id)}">
+      <article class="post-card ${options.threadRoot ? 'thread-root' : ''} ${threadOpenable ? 'thread-openable' : ''}" data-post-id="${escapeAttr(post.id)}"${threadOpenable ? ' data-open-thread="true" tabindex="0" aria-label="投稿のスレッドを開く"' : ''}>
         <span class="avatar ${isPersona ? 'ai' : ''}">${escapeHtml(initials(authorName))}</span>
         <div class="post-main">
           <div class="post-meta">
@@ -540,13 +543,33 @@
     const tag = event.target.closest('[data-filter-tag]');
     if (tag) return filterByTag({ target: tag });
     const button = event.target.closest('[data-action]');
-    if (!button) return;
-    const id = button.dataset.id;
-    const action = button.dataset.action;
-    if (action === 'favorite') return toggleFavorite(id, button);
-    if (action === 'reply') return openThread(id);
-    if (action === 'edit-post') return openPostEditor(id);
-    if (action === 'delete-post') return deletePost(id);
+    if (button) {
+      const id = button.dataset.id;
+      const action = button.dataset.action;
+      if (action === 'favorite') return toggleFavorite(id, button);
+      if (action === 'reply') return openThread(id);
+      if (action === 'edit-post') return openPostEditor(id);
+      if (action === 'delete-post') return deletePost(id);
+      return;
+    }
+    const postId = timelinePostIdFromEvent(event);
+    if (postId) return openThread(postId);
+  }
+
+  function timelinePostIdFromEvent(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return '';
+    if (target.closest('a, button, input, textarea, select, summary, details, label')) return '';
+    const post = target.closest('.post-card[data-open-thread="true"]');
+    return post ? String(post.dataset.postId || '') : '';
+  }
+
+  function handleTimelineKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const post = event.target && event.target.closest && event.target.closest('.post-card[data-open-thread="true"]');
+    if (!post || event.target !== post) return;
+    event.preventDefault();
+    openThread(post.dataset.postId);
   }
 
   async function toggleFavorite(id, button) {

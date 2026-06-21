@@ -19,7 +19,7 @@ function createPostRecord_(options) {
     authorId: String(options.authorId || options.email || ''),
     authorName: String(options.authorName || ''),
     sourceLabel: String(options.sourceLabel || ''),
-    sourceUrl: normalizeDriveUrl_(options.sourceUrl)
+    sourceUrl: normalizeWorkspaceUrl_(options.sourceUrl)
   };
 }
 
