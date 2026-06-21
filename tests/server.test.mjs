@@ -176,7 +176,7 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.equal(app.apiListPersonas().data.length, 0);
 });
 
-test('Workspace Studio replies about one third of the time and lets Gemini choose a meaningful target', () => {
+test('Workspace Studio chooses unfinished thoughts instead of replying by chance', () => {
   const app = createContext();
   app.setupPorotter();
   const persona = app.apiSavePersona('', {
@@ -186,14 +186,18 @@ test('Workspace Studio replies about one third of the time and lets Gemini choos
     enabled: true
   }).data;
   const first = app.apiCreatePost({ body: 'この手順の本当の目的は何だろう？', tags: ['問い'] }).data;
-  const second = app.apiCreatePost({ body: '会議前に論点を一行で置くと、説明の順番が変わった。', tags: ['気づき'] }).data;
+  const second = app.apiCreatePost({ body: '会議前に資料を共有した。', tags: ['記録'] }).data;
+  const third = app.apiCreatePost({ body: '引き継ぎで迷った点を、次回はどう改善できるだろう。', tags: ['引き継ぎ'] }).data;
+  app.apiCreatePost({ body: '引き継ぎの説明順を少し変えた。', tags: ['引き継ぎ'] });
 
-  const replyActivity = app.chooseStudioActivity_('owner@example.com', persona, 0.32);
+  const replyActivity = app.chooseStudioActivity_('owner@example.com', persona);
   assert.equal(replyActivity.type, 'reply-choice');
   assert.ok(replyActivity.context.candidatePostIds.includes(first.id));
+  assert.ok(replyActivity.context.candidatePostIds.includes(third.id));
+  assert.ok(!replyActivity.context.candidatePostIds.includes(second.id));
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
+  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
-  assert.equal(app.chooseStudioActivity_('owner@example.com', persona, 0.34).type, 'post');
 
   const published = app.onExecutePublishPorotterPost({
     workflow: {
@@ -202,8 +206,8 @@ test('Workspace Studio replies about one third of the time and lets Gemini choos
           personaId: { stringValues: [persona.id] },
           actionContext: { stringValues: [JSON.stringify(replyActivity.context)] },
           generatedText: { stringValues: [JSON.stringify({
-            targetPostId: second.id,
-            body: '論点を先に一行にすると、参加者が説明を聞く前から自分の判断軸を持てますね。次は「決めないこと」も一行添えると、脱線も減らせそうです。'
+            targetPostId: first.id,
+            body: '手順を守ることと目的を満たすことを分けてみると、残すべき工程が見えそうです。次回は「この工程がないと誰が困るか」から確かめてはどうでしょう。'
           })] }
         }
       }
@@ -211,13 +215,25 @@ test('Workspace Studio replies about one third of the time and lets Gemini choos
   });
   const output = published.hostAppAction.workflowAction.variableDataMap;
   assert.equal(output.entryType.stringValues[0], 'reply');
-  assert.equal(output.postId.stringValues[0], second.id);
+  assert.equal(output.postId.stringValues[0], first.id);
   assert.ok(output.replyId.stringValues[0]);
-  const thread = app.apiThread(second.id).data;
+  const thread = app.apiThread(first.id).data;
   assert.equal(thread.replies.length, 1);
   assert.equal(thread.replies[0].authorType, 'persona');
   assert.equal(thread.replies[0].authorName, persona.name);
   assert.equal(thread.replies[0].parentReplyId, '');
+  assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
+  assert.throws(() => app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [persona.id] },
+          actionContext: { stringValues: [JSON.stringify(replyActivity.context)] },
+          generatedText: { stringValues: [JSON.stringify({ targetPostId: first.id, body: '重複返信' })] }
+        }
+      }
+    }
+  }), /すでにAIが返信/);
 });
 
 test('Workspace Studio prioritizes unanswered user replies to AI posts and does not answer twice', () => {
@@ -242,7 +258,7 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   const aiPostId = aiPostResult.hostAppAction.workflowAction.variableDataMap.postId.stringValues[0];
   const userReply = app.apiCreateReply(aiPostId, { body: '最初に何を確認すれば迷いにくいでしょう？' }).data;
 
-  const priorityActivity = app.chooseStudioActivity_('owner@example.com', persona, 0.99);
+  const priorityActivity = app.chooseStudioActivity_('owner@example.com', persona);
   assert.equal(priorityActivity.type, 'reply-to-user');
   assert.equal(priorityActivity.context.postId, aiPostId);
   assert.equal(priorityActivity.context.parentReplyId, userReply.id);
@@ -267,7 +283,7 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   assert.equal(thread.replies.length, 2);
   assert.equal(thread.replies[1].authorType, 'persona');
   assert.equal(thread.replies[1].parentReplyId, userReply.id);
-  assert.equal(app.chooseStudioActivity_('owner@example.com', persona, 0.99).type, 'post');
+  assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
 
   assert.throws(() => app.onExecutePublishPorotterPost({
     workflow: {

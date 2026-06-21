@@ -121,7 +121,7 @@ npx @google/clasp deploy --deploymentId AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4g
 
 ## Workspace StudioによるAI投稿・返信
 
-疑似アカウントを設定画面で作成した後、[Workspace Studio設定ガイド](WORKSPACE_STUDIO.md)に沿って定時フローを作成します。未回答のユーザー返信を最優先し、それ以外では約3回に1回、AIが既存投稿へ返信します。生成時には最近のDrive更新、受信メール、Chatの新規投稿とフォロー中スレッドを参照候補にします。外部APIやWebhookは不要です。
+疑似アカウントを設定画面で作成した後、[Workspace Studio設定ガイド](WORKSPACE_STUDIO.md)に沿って定時フローを作成します。未回答のユーザー返信を最優先し、それ以外では問い、違和感、未完了を示すタグ、時間経過、反復テーマから価値のある候補だけを選んでAIが返信します。生成時には最近のDrive更新、受信メール、Chatの新規投稿とフォロー中スレッドを参照候補にします。外部APIやWebhookは不要です。
 
 ## ローカル確認
 

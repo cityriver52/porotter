@@ -8,7 +8,7 @@ function onConfigPickPorotterPersona() {
     sections: [{
       header: '投稿または返信を準備する',
       widgets: [
-        { textParagraph: { text: '疑似アカウントと今回の動作を選び、Gemini用のプロンプトを出力します。未回答のユーザー返信を最優先し、それ以外は約3回に1回、返信を選びます。' } },
+        { textParagraph: { text: '疑似アカウントと今回の動作を選び、Gemini用のプロンプトを出力します。未回答のユーザー返信を最優先し、それ以外は問い・違和感・反復テーマなどから、今返す価値がある投稿だけを返信候補にします。' } },
         { buttonList: { buttons: [studioSaveButton_()] } }
       ]
     }]
@@ -23,7 +23,7 @@ function onExecutePickPorotterPersona() {
     throw new Error('有効な疑似アカウントがありません。ぽろったーの設定画面で作成してください。');
   }
   const persona = personas[Math.floor(Math.random() * personas.length)];
-  const activity = chooseStudioActivity_(email, persona, Math.random());
+  const activity = chooseStudioActivity_(email, persona);
   return studioOutputVariables_({
     personaId: studioStringValue_(persona.id),
     personaName: studioStringValue_(persona.name),
@@ -105,7 +105,7 @@ function onExecutePublishPorotterPost(event) {
   });
 }
 
-function chooseStudioActivity_(email, persona, randomValue) {
+function chooseStudioActivity_(email, persona) {
   const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
     .filter(function (post) { return !post.deletedAt; });
   const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
@@ -139,26 +139,50 @@ function chooseStudioActivity_(email, persona, randomValue) {
     };
   }
 
-  const roll = Math.max(0, Math.min(Number(randomValue) || 0, 0.999999999));
-  if (roll >= (1 / 3) || !posts.length) {
+  const now = Date.now();
+  const cooldownCutoff = now - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const recentlyReplied = replies.some(function (reply) {
+    return String(reply.authorType || 'user') === 'persona' &&
+      !reply.parentReplyId && new Date(reply.createdAt).getTime() >= cooldownCutoff;
+  });
+  if (recentlyReplied || !posts.length) {
     return { type: 'post', context: { type: 'post' }, targetSummary: '新しい気づきを投稿' };
   }
 
-  let candidates = posts.filter(function (post) {
-    return !(String(post.authorType) === 'persona' && String(post.authorId) === String(persona.id));
-  });
-  if (!candidates.length) candidates = posts.slice();
-  candidates = candidates
-    .map(function (post) {
-      return { post: post, score: studioReplyCandidateScore_(post, replies) };
+  const repliedPostIds = replies.reduce(function (result, reply) {
+    if (String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId) {
+      result[String(reply.postId)] = true;
+    }
+    return result;
+  }, {});
+  const maxAge = CONFIG_.STUDIO_REPLY_MAX_POST_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const themeCounts = studioReplyThemeCounts_(posts, now);
+  const candidates = posts
+    .filter(function (post) {
+      const age = now - new Date(post.createdAt).getTime();
+      return String(post.authorType || 'user') !== 'persona' &&
+        !repliedPostIds[String(post.id)] && age >= 0 && age <= maxAge;
     })
+    .map(function (post) {
+      return {
+        post: post,
+        score: studioReplyCandidateScore_(post, replies, {
+          now: now,
+          themeCounts: themeCounts
+        })
+      };
+    })
+    .filter(function (item) { return item.score >= CONFIG_.STUDIO_REPLY_MIN_SCORE; })
     .sort(function (a, b) { return b.score - a.score || compareCreatedDescending_(a.post, b.post); })
     .slice(0, 8)
     .map(function (item) { return item.post; });
+  if (!candidates.length) {
+    return { type: 'post', context: { type: 'post' }, targetSummary: '返信に適した未完の思考がないため、新しい気づきを投稿' };
+  }
   return {
     type: 'reply-choice',
     context: { type: 'reply-choice', candidatePostIds: candidates.map(function (post) { return String(post.id); }) },
-    targetSummary: candidates.length + '件の候補から内容に応じて返信先を選択',
+    targetSummary: candidates.length + '件の未完の思考から内容に応じて返信先を選択',
     candidates: candidates.map(function (post) {
       return {
         id: String(post.id),
@@ -172,13 +196,40 @@ function chooseStudioActivity_(email, persona, randomValue) {
   };
 }
 
-function studioReplyCandidateScore_(post, replies) {
+function studioReplyThemeCounts_(posts, now) {
+  const cutoff = now - (CONFIG_.STUDIO_REPLY_THEME_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return posts.reduce(function (counts, post) {
+    if (String(post.authorType || 'user') === 'persona' || new Date(post.createdAt).getTime() < cutoff) {
+      return counts;
+    }
+    parseTags_(post.tags).forEach(function (tag) {
+      const key = String(tag).toLocaleLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, {});
+}
+
+function studioReplyCandidateScore_(post, replies, options) {
+  const context = options || {};
   const body = String(post.body || '');
-  let score = Math.min(Array.from(body).length, 160) / 40;
-  if (/[？?]/.test(body)) score += 2;
+  const tags = parseTags_(post.tags).map(function (tag) { return String(tag).toLocaleLowerCase(); });
+  const openLoopTags = ['あとで考える', '違和感', '問い', '迷い', '仮説'];
+  const reflectionTags = ['気づき', 'アイデア', '学び', '改善'];
+  let score = Math.min(Array.from(body).length, 160) / 50;
+  if (/[？?]/.test(body)) score += 3.5;
   if (/(気づ|違和感|課題|改善|仮説|なぜ|どう|迷|振り返)/.test(body)) score += 2;
+  if (tags.some(function (tag) { return openLoopTags.indexOf(tag) >= 0; })) score += 2.5;
+  if (tags.some(function (tag) { return reflectionTags.indexOf(tag) >= 0; })) score += 1;
   const replyCount = replies.filter(function (reply) { return String(reply.postId) === String(post.id); }).length;
-  score += Math.max(0, 2 - replyCount * 0.5);
+  score += replyCount ? Math.max(0, 0.75 - replyCount * 0.25) : 1.5;
+  const repeatedThemes = tags.filter(function (tag) {
+    return context.themeCounts && Number(context.themeCounts[tag]) >= 2;
+  }).length;
+  score += Math.min(3, repeatedThemes * 1.5);
+  const ageHours = Math.max(0, (Number(context.now) - new Date(post.createdAt).getTime()) / (60 * 60 * 1000));
+  if (ageHours >= 6) score += 0.75;
+  if (ageHours >= 24) score += 0.75;
   return score;
 }
 
@@ -242,6 +293,7 @@ function buildReplyChoicePrompt_(persona, activity) {
     ''
   ].concat(workspaceContextPromptLines_()).concat([
     '対象内に候補投稿の議論を深める関連情報があれば、その要点も抽象化して返信へ反映してください。見つからなければ無理に補わないでください。',
+    '候補は、問い、違和感、未完了の印、時間経過、最近繰り返されたテーマをもとに選ばれています。',
     '候補の中から、この人物の視点で最も有意義に議論を進められる投稿を1件選んでください。',
     '既存返信と重複せず、補足、具体例、反証、問い直し、または次の一手につながる返信にしてください。',
     '単なる称賛や要約だけにせず、質問は必要なら1つまで。本文は日本語240文字以内です。',
@@ -288,6 +340,17 @@ function publishStudioReplyChoice_(email, persona, context, generated) {
   const targetId = candidateIds.indexOf(requestedId) >= 0 ? requestedId : candidateIds[0];
   const post = ownedRecord_(CONFIG_.SHEETS.POSTS, targetId, email);
   assertNotDeleted_(post);
+  const cooldownCutoff = Date.now() - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const personaReplies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
+    .filter(function (reply) {
+      return !reply.deletedAt && String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId;
+    });
+  if (personaReplies.some(function (reply) { return String(reply.postId) === String(post.id); })) {
+    throw new Error('この投稿にはすでにAIが返信しています。');
+  }
+  if (personaReplies.some(function (reply) { return new Date(reply.createdAt).getTime() >= cooldownCutoff; })) {
+    throw new Error('直近にAIが返信しているため、今回の自発的な返信は見送ります。');
+  }
   return publishStudioReply_(email, persona, post, '', generated.body);
 }
 
