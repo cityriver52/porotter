@@ -68,6 +68,25 @@ test('validation and authorization are enforced on the server', () => {
   assert.match(denied.error, /権限/);
 });
 
+test('existing reply rows are preserved when AI reply metadata columns are added', () => {
+  const harness = createAppsScriptHarness(root);
+  const app = harness.context;
+  app.setupPorotter();
+  const post = app.apiCreatePost({ body: '移行前の投稿', tags: [] }).data;
+  const reply = app.apiCreateReply(post.id, { body: '移行前の返信' }).data;
+  const replySheet = harness.spreadsheet.getSheetByName('Replies');
+  replySheet.rows = replySheet.rows.map(row => row.slice(0, 7));
+
+  app.setupPorotter();
+
+  assert.deepEqual(Array.from(replySheet.rows[0]), Array.from(app.__definitions.REPLIES.headers));
+  const thread = app.apiThread(post.id).data;
+  assert.equal(thread.replies[0].id, reply.id);
+  assert.equal(thread.replies[0].body, '移行前の返信');
+  assert.equal(thread.replies[0].authorType, 'user');
+  assert.equal(thread.replies[0].parentReplyId, '');
+});
+
 test('timeline filters, pagination, settings and permanent deletion work', () => {
   const app = createContext();
   app.setupPorotter();
@@ -125,14 +144,20 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   const picked = app.onExecutePickPorotterPersona();
   const pickedMap = picked.hostAppAction.workflowAction.variableDataMap;
   assert.equal(pickedMap.personaId.stringValues[0], saved.data.id);
-  assert.match(pickedMap.generationPrompt.stringValues[0], /過去7日/);
+  const generationPrompt = pickedMap.generationPrompt.stringValues[0];
+  assert.match(generationPrompt, /過去7日/);
+  assert.match(generationPrompt, /Google Drive/);
+  assert.match(generationPrompt, /Gmail/);
+  assert.match(generationPrompt, /Google Chat/);
+  assert.match(generationPrompt, /フォローしていないスレッドへの返信を必ず無視/);
+  assert.match(generationPrompt, /フォロー状態を確認できない返信も対象外/);
 
   const published = app.onExecutePublishPorotterPost({
     workflow: {
       actionInvocation: {
         inputs: {
           personaId: { stringValues: [saved.data.id] },
-          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の予算資料', sourceUrl: '' })] }
+          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の連絡', sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/example' })] }
         }
       }
     }
@@ -142,8 +167,117 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.equal(timeline.data.total, 1);
   assert.equal(timeline.data.posts[0].authorType, 'persona');
   assert.equal(timeline.data.posts[0].authorName, '経理の見張り番');
+  assert.equal(timeline.data.posts[0].sourceUrl, 'https://mail.google.com/mail/u/0/#inbox/example');
+  assert.equal(app.normalizeWorkspaceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
+  assert.equal(app.normalizeWorkspaceUrl_('https://evil.example/?next=https://mail.google.com/'), '');
 
   assert.equal(app.apiTogglePersona(saved.data.id).data.enabled, false);
   assert.equal(app.apiDeletePersona(saved.data.id).ok, true);
   assert.equal(app.apiListPersonas().data.length, 0);
+});
+
+test('Workspace Studio replies about one third of the time and lets Gemini choose a meaningful target', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '問いを深める人',
+    role: '対話役',
+    prompt: '前提を確かめ、次の一歩につながる問いを返します。',
+    enabled: true
+  }).data;
+  const first = app.apiCreatePost({ body: 'この手順の本当の目的は何だろう？', tags: ['問い'] }).data;
+  const second = app.apiCreatePost({ body: '会議前に論点を一行で置くと、説明の順番が変わった。', tags: ['気づき'] }).data;
+
+  const replyActivity = app.chooseStudioActivity_('owner@example.com', persona, 0.32);
+  assert.equal(replyActivity.type, 'reply-choice');
+  assert.ok(replyActivity.context.candidatePostIds.includes(first.id));
+  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
+  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
+  assert.equal(app.chooseStudioActivity_('owner@example.com', persona, 0.34).type, 'post');
+
+  const published = app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [persona.id] },
+          actionContext: { stringValues: [JSON.stringify(replyActivity.context)] },
+          generatedText: { stringValues: [JSON.stringify({
+            targetPostId: second.id,
+            body: '論点を先に一行にすると、参加者が説明を聞く前から自分の判断軸を持てますね。次は「決めないこと」も一行添えると、脱線も減らせそうです。'
+          })] }
+        }
+      }
+    }
+  });
+  const output = published.hostAppAction.workflowAction.variableDataMap;
+  assert.equal(output.entryType.stringValues[0], 'reply');
+  assert.equal(output.postId.stringValues[0], second.id);
+  assert.ok(output.replyId.stringValues[0]);
+  const thread = app.apiThread(second.id).data;
+  assert.equal(thread.replies.length, 1);
+  assert.equal(thread.replies[0].authorType, 'persona');
+  assert.equal(thread.replies[0].authorName, persona.name);
+  assert.equal(thread.replies[0].parentReplyId, '');
+});
+
+test('Workspace Studio prioritizes unanswered user replies to AI posts and does not answer twice', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '現場の伴走者',
+    role: '実務改善',
+    prompt: '小さく試せる具体策を返します。',
+    enabled: true
+  }).data;
+  const aiPostResult = app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [persona.id] },
+          generatedText: { stringValues: [JSON.stringify({ body: '引き継ぎ資料は、情報量より最初の10分で迷わない順番が大切かもしれない。', tags: ['引き継ぎ'] })] }
+        }
+      }
+    }
+  });
+  const aiPostId = aiPostResult.hostAppAction.workflowAction.variableDataMap.postId.stringValues[0];
+  const userReply = app.apiCreateReply(aiPostId, { body: '最初に何を確認すれば迷いにくいでしょう？' }).data;
+
+  const priorityActivity = app.chooseStudioActivity_('owner@example.com', persona, 0.99);
+  assert.equal(priorityActivity.type, 'reply-to-user');
+  assert.equal(priorityActivity.context.postId, aiPostId);
+  assert.equal(priorityActivity.context.parentReplyId, userReply.id);
+  const priorityPrompt = app.buildPersonaGenerationPrompt_(persona, priorityActivity);
+  assert.match(priorityPrompt, /ユーザーから届いた返信/);
+  assert.match(priorityPrompt, /Gmail/);
+  assert.match(priorityPrompt, /フォロー状態を確認できない返信も対象外/);
+
+  app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [persona.id] },
+          actionContext: { stringValues: [JSON.stringify(priorityActivity.context)] },
+          generatedText: { stringValues: [JSON.stringify({ body: 'まず「今日中に自分で進めること」と「誰かに聞くこと」を分ける案内があると、最初の10分で立ち止まりにくくなります。' })] }
+        }
+      }
+    }
+  });
+
+  const thread = app.apiThread(aiPostId).data;
+  assert.equal(thread.replies.length, 2);
+  assert.equal(thread.replies[1].authorType, 'persona');
+  assert.equal(thread.replies[1].parentReplyId, userReply.id);
+  assert.equal(app.chooseStudioActivity_('owner@example.com', persona, 0.99).type, 'post');
+
+  assert.throws(() => app.onExecutePublishPorotterPost({
+    workflow: {
+      actionInvocation: {
+        inputs: {
+          personaId: { stringValues: [persona.id] },
+          actionContext: { stringValues: [JSON.stringify(priorityActivity.context)] },
+          generatedText: { stringValues: [JSON.stringify({ body: '重複返信' })] }
+        }
+      }
+    }
+  }), /すでにAIが返信/);
 });

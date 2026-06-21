@@ -3,14 +3,16 @@
   const iso = offsetDays => new Date(now - offsetDays * 86400000).toISOString();
   let posts = [
     { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2, authorType: 'user', authorName: '' },
-    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 0, authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
+    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 2, authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
     { id: 'p3', body: '「便利にする」と「考えなくてよくする」は似ているようで違う。ここはもう少し掘りたい。', tags: ['アイデア'], createdAt: iso(9), updatedAt: iso(8), favorite: false, deletedAt: '', replyCount: 1 },
     { id: 'p4', body: '午後の集中力は、タスクの難しさより切り替え回数に削られている気がする。', tags: ['気づき'], createdAt: iso(30), updatedAt: iso(30), favorite: true, deletedAt: '', replyCount: 0 }
   ];
   let replies = [
-    { id: 'r1', postId: 'p1', body: '翌日読み返すと、違和感の正体は前提条件が共有されていないことだった。', createdAt: iso(0.02), updatedAt: iso(0.02) },
-    { id: 'r2', postId: 'p1', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01) },
-    { id: 'r3', postId: 'p3', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7) }
+    { id: 'r1', postId: 'p1', parentReplyId: '', body: '翌日読み返すと、違和感の正体は前提条件が共有されていないことだった。', createdAt: iso(0.02), updatedAt: iso(0.02), authorType: 'user', authorName: 'わたし' },
+    { id: 'r2', postId: 'p1', parentReplyId: '', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01), authorType: 'user', authorName: 'わたし' },
+    { id: 'r3', postId: 'p3', parentReplyId: '', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7), authorType: 'user', authorName: 'わたし' },
+    { id: 'r4', postId: 'p2', parentReplyId: '', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), authorType: 'user', authorName: 'わたし' },
+    { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人' }
   ];
   let settings = { displayName: 'わたし', email: 'me@example.com', theme: 'system', pageSize: 20, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
@@ -58,7 +60,7 @@
     apiThread: id => ({ post: posts.find(item => item.id === id), replies: replies.filter(reply => reply.postId === id) }),
     apiCreateReply: (postId, payload) => {
       const stamp = new Date().toISOString();
-      const reply = { id: uuid('r'), postId, body: payload.body, createdAt: stamp, updatedAt: stamp };
+      const reply = { id: uuid('r'), postId, parentReplyId: '', body: payload.body, createdAt: stamp, updatedAt: stamp, authorType: 'user', authorName: settings.displayName };
       replies.push(reply);
       posts.find(item => item.id === postId).replyCount += 1;
       return reply;

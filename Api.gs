@@ -93,7 +93,15 @@ function apiCreateReply(postId, payload) {
   return runLockedApi_(function (email) {
       const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
       assertNotDeleted_(post);
-      const reply = createReplyRecord_(post.id, email, payload && payload.body);
+      const settings = readSettings_();
+      const reply = createReplyRecord_({
+        postId: post.id,
+        email: email,
+        body: payload && payload.body,
+        authorType: 'user',
+        authorId: email,
+        authorName: String(settings.displayName || email.split('@')[0])
+      });
       appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
       return presentReply_(reply);
   });
@@ -410,7 +418,7 @@ function presentPost_(record, replyCount) {
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || ''),
     sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeDriveUrl_(record.sourceUrl)
+    sourceUrl: normalizeWorkspaceUrl_(record.sourceUrl)
   };
 }
 
@@ -418,9 +426,13 @@ function presentReply_(record) {
   return {
     id: String(record.id),
     postId: String(record.postId),
+    parentReplyId: String(record.parentReplyId || ''),
     body: String(record.body || ''),
     createdAt: String(record.createdAt || ''),
-    updatedAt: String(record.updatedAt || record.createdAt || '')
+    updatedAt: String(record.updatedAt || record.createdAt || ''),
+    authorType: String(record.authorType || 'user'),
+    authorId: String(record.authorId || ''),
+    authorName: String(record.authorName || '')
   };
 }
 

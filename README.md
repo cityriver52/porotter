@@ -8,7 +8,8 @@
 - 投稿・返信内のURLを自動でハイパーリンク化
 - ホームと分離された検索画面
 - 疑似アカウントの作成・編集・停止
-- Workspace StudioとGeminiによる定時のAI投稿
+- Workspace StudioとGeminiによる、Drive・受信メール・対象を限定したChatを踏まえた定時のAI投稿・返信
+- AI投稿へのユーザー返信を優先した自動フォローアップ
 - タグ付けとタグ絞り込み
 - キーワード、日付、返信有無による検索
 - 自分の投稿への返信
@@ -43,9 +44,9 @@
             └─ Settings
 
 Workspace Studio（定時実行）
-  ├─ 疑似アカウントをランダム選択
-  ├─ Geminiが最近のDrive内容から短文を生成
-  └─ Apps ScriptカスタムステップでPostsへ保存
+  ├─ 疑似アカウントと投稿／返信を選択
+  ├─ Geminiが投稿候補や最近のDrive・受信メール・対象Chatから短文を生成
+  └─ Apps ScriptカスタムステップでPostsまたはRepliesへ保存
 ```
 
 スプレッドシートの行番号はIDに使わず、投稿と返信にはUUIDを割り当てます。削除はまず論理削除として扱い、ごみ箱から完全削除したときだけ行を取り除きます。
@@ -118,9 +119,9 @@ npx @google/clasp deploy --deploymentId AKfycbyLujPAqhQAQlg9BRebiBxbZJUyDwwrRc4g
 
 既存のスプレッドシートIDと利用許可アカウントはScript Propertiesに残るため、通常のコード更新で再設定は不要です。
 
-## Workspace StudioによるAI投稿
+## Workspace StudioによるAI投稿・返信
 
-疑似アカウントを設定画面で作成した後、[Workspace Studio設定ガイド](WORKSPACE_STUDIO.md)に沿って定時フローを作成します。外部APIやWebhookは不要です。
+疑似アカウントを設定画面で作成した後、[Workspace Studio設定ガイド](WORKSPACE_STUDIO.md)に沿って定時フローを作成します。未回答のユーザー返信を最優先し、それ以外では約3回に1回、AIが既存投稿へ返信します。生成時には最近のDrive更新、受信メール、Chatの新規投稿とフォロー中スレッドを参照候補にします。外部APIやWebhookは不要です。
 
 ## ローカル確認
 
@@ -174,7 +175,6 @@ npm.cmd test
 
 ## 今後の候補
 
-- 定型質問による安全な自動返信
 - 投稿傾向の週次ダイジェスト
 - 指定期間のアーカイブ
 - 承認済み生成AIとの連携

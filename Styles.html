@@ -151,6 +151,10 @@
   .timeline-status { padding: 8px 22px 0; color: var(--muted); font-size: 12px; }
   .post-card { position: relative; display: flex; gap: 13px; padding: 17px 21px 12px; border-bottom: 1px solid var(--line); transition: background .18s ease; }
   .post-card:hover { background: color-mix(in srgb, var(--surface-soft) 45%, transparent); }
+  .post-card.thread-openable { cursor: pointer; }
+  .post-card.thread-openable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .post-card.thread-openable a,
+  .post-card.thread-openable button { cursor: pointer; }
   .post-main { min-width: 0; flex: 1; }
   .post-meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .post-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -237,9 +241,12 @@
   .thread-content { max-height: 52vh; overflow-y: auto; }
   .thread-root { border-left: 3px solid var(--accent); }
   .reply-card { position: relative; display: flex; gap: 12px; padding: 14px 20px 14px 28px; border-top: 1px solid var(--line); }
+  .reply-card.nested-reply { padding-left: 50px; background: color-mix(in srgb, var(--accent-soft) 24%, transparent); }
   .reply-card::before { content: ""; position: absolute; left: 20px; top: -22px; width: 2px; height: 32px; background: var(--line); }
+  .reply-card.nested-reply::before { left: 40px; }
   .reply-body { flex: 1; min-width: 0; }
   .reply-body p { margin: 4px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .replying-to { margin-top: 3px; color: var(--accent-strong); font-size: 12px; }
   .reply-actions { display: flex; gap: 8px; }
   .reply-actions button { padding: 2px 5px; border: 0; background: none; color: var(--muted); font-size: 12px; }
   .reply-actions button:hover { color: var(--accent-strong); }

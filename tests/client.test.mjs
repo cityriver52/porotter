@@ -25,6 +25,11 @@ const tagEnd = client.indexOf('  function tagAutocompleteConfig(mode)');
 if (tagStart < 0 || tagEnd < 0) throw new Error('Tag autocomplete helpers were not found.');
 vm.runInContext(`${client.slice(tagStart, tagEnd)}\nthis.parseTagInput = parseTagInput; this.normalizeSingleTag = normalizeSingleTag; this.currentTagFragment = currentTagFragment; this.replaceCurrentTag = replaceCurrentTag; this.matchingTags = matchingTags;`, context);
 
+const timelineTargetStart = client.indexOf('  function timelinePostIdFromEvent(event)');
+const timelineTargetEnd = client.indexOf('  function handleTimelineKeydown(event)');
+if (timelineTargetStart < 0 || timelineTargetEnd < 0) throw new Error('Post-card thread navigation helper was not found.');
+vm.runInContext(`${client.slice(timelineTargetStart, timelineTargetEnd)}\nthis.timelinePostIdFromEvent = timelinePostIdFromEvent;`, context);
+
 test('formatBody converts http and www URLs into safe links', () => {
   const html = context.formatBody('確認 https://example.com/path?a=1&b=2。 www.openai.com も。');
 
@@ -79,4 +84,14 @@ test('tag suggestions match existing tags by text and prefer prefix matches', ()
   const matches = Array.from(context.matchingTags(tags, '改善', []), tag => tag.name);
   assert.deepEqual(matches, ['改善メモ', '業務改善']);
   assert.deepEqual(Array.from(context.matchingTags(tags, '', ['学び']), tag => tag.name), ['業務改善', '改善メモ']);
+});
+
+test('post-card clicks open threads but interactive controls keep their own action', () => {
+  const post = { dataset: { postId: 'post-123' } };
+  const cardTarget = { closest: selector => selector.startsWith('a, button') ? null : post };
+  const linkTarget = { closest: selector => selector.startsWith('a, button') ? {} : post };
+
+  assert.equal(context.timelinePostIdFromEvent({ target: cardTarget }), 'post-123');
+  assert.equal(context.timelinePostIdFromEvent({ target: linkTarget }), '');
+  assert.equal(context.timelinePostIdFromEvent({ target: null }), '');
 });
