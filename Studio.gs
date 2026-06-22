@@ -39,7 +39,8 @@ function publishGeneratedPorotter_(email, personaId, actionContextValue, generat
   };
 }
 
-function chooseStudioActivity_(email, persona) {
+function chooseStudioActivity_(email, persona, options) {
+  const only = String(options && options.only || '');
   const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
     .filter(function (post) { return !post.deletedAt; });
   const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
@@ -61,7 +62,7 @@ function chooseStudioActivity_(email, persona) {
       !answeredReplyIds[String(reply.id)];
   }).sort(compareCreatedAscending_);
 
-  if (pendingUserReplies.length) {
+  if (only !== 'post' && pendingUserReplies.length) {
     const targetReply = pendingUserReplies[0];
     const targetPost = postById[String(targetReply.postId)];
     return {
@@ -73,13 +74,18 @@ function chooseStudioActivity_(email, persona) {
     };
   }
 
+  if (only === 'post') {
+    return { type: 'post', context: { type: 'post' }, targetSummary: '新しい気づきを投稿' };
+  }
+
   const now = Date.now();
-  const cooldownCutoff = now - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const cooldownCutoff = now - (studioReplyCooldownHours_() * 60 * 60 * 1000);
   const recentlyReplied = replies.some(function (reply) {
     return String(reply.authorType || 'user') === 'persona' &&
       !reply.parentReplyId && new Date(reply.createdAt).getTime() >= cooldownCutoff;
   });
   if (recentlyReplied || !posts.length) {
+    if (only === 'reply') return null;
     return { type: 'post', context: { type: 'post' }, targetSummary: '新しい気づきを投稿' };
   }
 
@@ -111,6 +117,7 @@ function chooseStudioActivity_(email, persona) {
     .slice(0, 8)
     .map(function (item) { return item.post; });
   if (!candidates.length) {
+    if (only === 'reply') return null;
     return { type: 'post', context: { type: 'post' }, targetSummary: '返信に適した未完の思考がないため、新しい気づきを投稿' };
   }
   return {
@@ -274,7 +281,7 @@ function publishStudioReplyChoice_(email, persona, context, generated) {
   const targetId = candidateIds.indexOf(requestedId) >= 0 ? requestedId : candidateIds[0];
   const post = ownedRecord_(CONFIG_.SHEETS.POSTS, targetId, email);
   assertNotDeleted_(post);
-  const cooldownCutoff = Date.now() - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const cooldownCutoff = Date.now() - (studioReplyCooldownHours_() * 60 * 60 * 1000);
   const personaReplies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
     .filter(function (reply) {
       return !reply.deletedAt && String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId;
@@ -306,6 +313,15 @@ function publishStudioReply_(email, persona, post, parentReplyId, body) {
     authorName: persona.name,
     body: reply.body
   };
+}
+
+function studioReplyCooldownHours_() {
+  const settings = readSettings_();
+  const configured = normalizeAiIntervalHours_(
+    settings.aiReplyIntervalHours,
+    CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
+  );
+  return configured || CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS;
 }
 
 function parseStudioActionContext_(value) {

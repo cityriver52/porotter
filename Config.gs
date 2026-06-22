@@ -22,6 +22,9 @@ const CONFIG_ = Object.freeze({
   STUDIO_REPLY_MAX_POST_AGE_DAYS: 45,
   AI_REQUEST_STALE_HOURS: 48,
   AI_REQUEST_PROCESS_LIMIT: 5,
+  DEFAULT_AI_POST_INTERVAL_HOURS: 6,
+  DEFAULT_AI_REPLY_INTERVAL_HOURS: 20,
+  AI_INTERVAL_HOURS: Object.freeze([0, 6, 12, 20, 24, 48, 72, 168]),
   AI_REQUEST_STATUS: Object.freeze({
     CREATING: 'CREATING',
     REQUESTED: 'REQUESTED',
@@ -184,6 +187,11 @@ function clampInteger_(value, fallback, minimum, maximum) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.floor(parsed)));
+}
+
+function normalizeAiIntervalHours_(value, fallback) {
+  const parsed = Number(value);
+  return CONFIG_.AI_INTERVAL_HOURS.indexOf(parsed) >= 0 ? parsed : fallback;
 }
 
 function isValidDateInput_(value) {

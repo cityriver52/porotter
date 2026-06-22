@@ -6,6 +6,8 @@
   const state = {
     settings: null,
     personas: [],
+    notifications: { items: [], unreadCount: 0 },
+    aiAutomation: null,
     posts: [],
     tags: [],
     filters: createFilters('timeline'),
@@ -18,7 +20,8 @@
     confirmResolver: null,
     loadingTimeline: false,
     dailyPrompt: null,
-    tagSuggestionIndex: { post: -1, search: -1 }
+    tagSuggestionIndex: { post: -1, search: -1 },
+    notificationTimer: null
   };
 
   const queryOne = (selector, root = document) => root.querySelector(selector);
@@ -64,16 +67,14 @@
     renderDailyPrompt();
     renderSkeletons();
     try {
-      const data = await callApi('apiBootstrap', state.filters);
-      state.settings = data.settings;
-      state.personas = data.personas || [];
-      applyTimelineData(data.timeline, false);
-      applySettings();
-      renderTimeline();
-      renderTagFilters();
-      renderDiscovery(data.discovery);
-      renderPersonas();
-      document.querySelector('#app').setAttribute('aria-busy', 'false');
+      const setup = await callApi('apiSetupStatus');
+      if (!setup.authorized) throw new Error('このアプリを利用する権限がありません。');
+      if (!setup.configured) {
+        queryOne('#setup-email').textContent = setup.email;
+        queryOne('#setup-screen').hidden = false;
+      } else {
+        await loadApplication();
+      }
     } catch (error) {
       renderFatalError(error);
     } finally {
@@ -81,7 +82,27 @@
     }
   }
 
+  async function loadApplication() {
+    const data = await callApi('apiBootstrap', state.filters);
+    state.settings = data.settings;
+    state.personas = data.personas || [];
+    state.notifications = data.notifications || { items: [], unreadCount: 0 };
+    state.aiAutomation = data.aiAutomation || null;
+    applyTimelineData(data.timeline, false);
+    applySettings();
+    renderTimeline();
+    renderTagFilters();
+    renderDiscovery(data.discovery);
+    renderPersonas();
+    renderNotifications();
+    renderAiAutomation();
+    queryAll('[data-app-ui]').forEach(element => { element.hidden = false; });
+    queryOne('#app').setAttribute('aria-busy', 'false');
+    if (!state.notificationTimer) state.notificationTimer = window.setInterval(refreshNotifications, 300000);
+  }
+
   function bindEvents() {
+    queryOne('#setup-button').addEventListener('click', runInitialSetup);
     queryOne('#post-form').addEventListener('submit', createPost);
     queryOne('#post-body').addEventListener('input', () => updateCount('#post-body', '#post-count'));
     bindTagAutocomplete('post', syncQuickTagsFromInput);
@@ -117,6 +138,12 @@
     queryAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => closeDialog(button.dataset.closeDialog)));
 
     queryOne('#settings-form').addEventListener('submit', saveSettings);
+    queryOne('#mark-notifications-read').addEventListener('click', markNotificationsRead);
+    queryOne('#notification-list').addEventListener('click', openNotification);
+    queryOne('#ai-install-button').addEventListener('click', installAiAutomation);
+    queryOne('#ai-uninstall-button').addEventListener('click', uninstallAiAutomation);
+    queryOne('#ai-refresh-button').addEventListener('click', () => refreshAiAutomation(true));
+    queryOne('#manual-ai-post-button').addEventListener('click', requestManualAiPost);
     queryOne('#persona-form').addEventListener('submit', savePersona);
     queryOne('#persona-cancel').addEventListener('click', resetPersonaForm);
     queryOne('.persona-templates').addEventListener('click', applyPersonaTemplate);
@@ -138,6 +165,24 @@
         queryAll('.post-menu[open]').forEach(menu => menu.removeAttribute('open'));
       }
     });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) refreshNotifications();
+    });
+  }
+
+  async function runInitialSetup() {
+    const button = queryOne('#setup-button');
+    setButtonBusy(button, true, 'セットアップ中…');
+    try {
+      await callApi('apiSetupPorotter');
+      queryOne('#setup-screen').hidden = true;
+      await loadApplication();
+      showToast('初期セットアップが完了しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+    }
   }
 
   function callApi(functionName, ...args) {
@@ -165,6 +210,8 @@
     queryOne('#email-input').value = state.settings.email;
     queryOne('#theme-input').value = state.settings.theme;
     queryOne('#page-size-input').value = String(state.settings.pageSize);
+    queryOne('#ai-post-frequency-input').value = String(state.settings.aiPostIntervalHours);
+    queryOne('#ai-reply-frequency-input').value = String(state.settings.aiReplyIntervalHours);
     queryOne('#persona-name').maxLength = state.settings.maxPersonaNameLength;
     queryOne('#persona-role').maxLength = state.settings.maxPersonaRoleLength;
     queryOne('#persona-prompt').maxLength = state.settings.maxPersonaPromptLength;
@@ -204,6 +251,7 @@
       endDate: '',
       replyState: '',
       favoriteOnly: view === 'favorites',
+      authorType: view === 'mine' ? 'user' : '',
       offset: 0
     };
   }
@@ -776,16 +824,18 @@
       else button.removeAttribute('aria-current');
     });
 
-    const timelineVisible = view === 'timeline' || view === 'favorites';
+    const timelineVisible = view === 'timeline' || view === 'mine' || view === 'favorites';
     queryOne('#timeline-view').hidden = !timelineVisible;
     queryOne('#timeline-view').classList.toggle('active', timelineVisible);
     queryOne('#composer').hidden = view !== 'timeline';
     queryOne('#search-view').hidden = view !== 'search';
+    queryOne('#notifications-view').hidden = view !== 'notifications';
     queryOne('#trash-view').hidden = view !== 'trash';
     queryOne('#settings-view').hidden = view !== 'settings';
 
     if (timelineVisible) {
-      queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : 'ホーム';
+      queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : view === 'mine' ? '自分の投稿' : 'ホーム';
+      queryOne('#timeline-eyebrow').textContent = view === 'mine' ? 'YOUR POSTS' : view === 'favorites' ? 'SAVED THOUGHTS' : 'PRIVATE TIMELINE';
       state.filters = createFilters(view);
       if (load) await loadTimeline(false);
     } else if (view === 'search') {
@@ -794,8 +844,11 @@
       if (load) await loadTimeline(false);
     } else if (view === 'trash') {
       if (load) await loadTrash();
+    } else if (view === 'notifications') {
+      if (load) await refreshNotifications();
     } else if (view === 'settings') {
       renderPersonas();
+      renderAiAutomation();
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -811,6 +864,58 @@
       showToast(error.message, true);
       renderEmptyState('ごみ箱を読み込めませんでした', error.message, '#trash-list');
     }
+  }
+
+  async function refreshNotifications() {
+    if (!state.settings) return;
+    try {
+      state.notifications = await callApi('apiNotifications');
+      renderNotifications();
+    } catch (error) {
+      if (state.currentView === 'notifications') showToast(error.message, true);
+    }
+  }
+
+  function renderNotifications() {
+    const data = state.notifications || { items: [], unreadCount: 0 };
+    queryAll('[data-notification-badge]').forEach(badge => {
+      badge.textContent = data.unreadCount > 99 ? '99+' : String(data.unreadCount || 0);
+      badge.hidden = !data.unreadCount;
+    });
+    queryOne('#notification-summary').textContent = data.unreadCount
+      ? `未読の通知が${data.unreadCount}件あります。`
+      : '未読の通知はありません。';
+    queryOne('#mark-notifications-read').disabled = !data.unreadCount;
+    queryOne('#notification-list').innerHTML = data.items && data.items.length
+      ? data.items.map(item => `
+        <button class="notification-card ${item.unread ? 'unread' : ''}" type="button" data-notification-post="${escapeAttr(item.postId)}">
+          <span class="notification-dot" aria-hidden="true"></span>
+          <span class="notification-content">
+            <span class="notification-meta"><strong>${escapeHtml(item.authorName)}</strong><span>から返信</span><time datetime="${escapeAttr(item.createdAt)}">${escapeHtml(formatRelativeDate(item.createdAt))}</time></span>
+            <p>${escapeHtml(item.body)}</p>
+            <span class="notification-context">元の投稿：${escapeHtml(item.postBody)}</span>
+          </span>
+        </button>`).join('')
+      : emptyStateHtml('通知はまだありません', '自分の投稿や、自分が参加したスレッドにAIから返信がつくと、ここに表示されます。');
+  }
+
+  async function markNotificationsRead() {
+    const button = queryOne('#mark-notifications-read');
+    setButtonBusy(button, true, '更新中…');
+    try {
+      state.notifications = await callApi('apiMarkNotificationsRead');
+      renderNotifications();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderNotifications();
+    }
+  }
+
+  function openNotification(event) {
+    const button = event.target.closest('[data-notification-post]');
+    if (button) openThread(button.dataset.notificationPost);
   }
 
   async function handleTrashAction(event) {
@@ -940,6 +1045,7 @@
 
   function renderPersonas() {
     const list = queryOne('#persona-list');
+    renderManualPersonaSelect();
     if (!state.personas.length) {
       list.innerHTML = '<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">✦</span><h2>疑似アカウントはまだありません</h2><p>上のテンプレートを選ぶと、すぐに作り始められます。</p></div>';
       return;
@@ -957,6 +1063,114 @@
           <button class="secondary-button" type="button" data-persona-action="delete" data-id="${escapeAttr(persona.id)}">削除</button>
         </div>
       </article>`).join('');
+  }
+
+  function renderManualPersonaSelect() {
+    const select = queryOne('#manual-ai-persona');
+    const current = select.value;
+    const enabled = state.personas.filter(persona => persona.enabled);
+    select.innerHTML = enabled.length
+      ? enabled.map(persona => `<option value="${escapeAttr(persona.id)}">${escapeHtml(persona.name)} — ${escapeHtml(persona.role)}</option>`).join('')
+      : '<option value="">有効な疑似アカウントがありません</option>';
+    if (enabled.some(persona => persona.id === current)) select.value = current;
+    const button = queryOne('#manual-ai-post-button');
+    if (!button.dataset.originalLabel) button.disabled = !enabled.length;
+  }
+
+  function renderAiAutomation() {
+    const status = state.aiAutomation || { installed: false, recentRequests: [] };
+    const pill = queryOne('#ai-automation-status');
+    pill.textContent = status.installed ? '自動化中' : '停止中';
+    pill.classList.toggle('active', Boolean(status.installed));
+    queryOne('#ai-install-button').disabled = Boolean(status.installed);
+    queryOne('#ai-uninstall-button').disabled = !status.installed;
+    const requests = status.recentRequests || [];
+    queryOne('#ai-request-status').innerHTML = requests.length
+      ? requests.slice(0, 5).map(request => {
+          const error = request.status === 'ERROR';
+          const label = ({ REQUESTED: 'Studio処理待ち', GENERATED: '投稿反映待ち', PUBLISHED: '公開済み', ERROR: 'エラー', CREATING: '準備中' })[request.status] || request.status;
+          return `<div class="ai-request-item ${error ? 'error' : ''}"><strong>${escapeHtml(request.personaName)}・${escapeHtml(request.actionType)}</strong> — ${escapeHtml(label)}<br><span>${escapeHtml(request.errorMessage || request.targetSummary)}</span></div>`;
+        }).join('')
+      : '<span>AI投稿の実行履歴はまだありません。</span>';
+    renderManualPersonaSelect();
+  }
+
+  async function refreshAiAutomation(processGenerated = false) {
+    const button = queryOne('#ai-refresh-button');
+    button.disabled = true;
+    try {
+      if (processGenerated) await callApi('apiProcessAiResponses');
+      state.aiAutomation = await callApi('apiGetAiAutomationStatus');
+      renderAiAutomation();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function installAiAutomation() {
+    const button = queryOne('#ai-install-button');
+    setButtonBusy(button, true, '設定中…');
+    try {
+      await callApi('apiInstallAiAutomation');
+      await refreshAiAutomation();
+      showToast('AI自動化を有効にしました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderAiAutomation();
+    }
+  }
+
+  async function uninstallAiAutomation() {
+    const button = queryOne('#ai-uninstall-button');
+    setButtonBusy(button, true, '停止中…');
+    try {
+      await callApi('apiUninstallAiAutomation');
+      await refreshAiAutomation();
+      showToast('AI自動化を停止しました。手動投稿は引き続き利用できます。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderAiAutomation();
+    }
+  }
+
+  async function requestManualAiPost() {
+    const button = queryOne('#manual-ai-post-button');
+    const personaId = queryOne('#manual-ai-persona').value;
+    setButtonBusy(button, true, '依頼中…');
+    try {
+      const result = await callApi('apiRequestAiPost', personaId);
+      if (!result.created) throw new Error(result.reason || 'AI投稿を依頼できませんでした。');
+      showToast('Workspace StudioへAI投稿を依頼しました。');
+      await pollAiRequest(result.requestId);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderManualPersonaSelect();
+    }
+  }
+
+  async function pollAiRequest(requestId) {
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      if (attempt) await new Promise(resolve => window.setTimeout(resolve, 5000));
+      await callApi('apiProcessAiResponses');
+      state.aiAutomation = await callApi('apiGetAiAutomationStatus');
+      renderAiAutomation();
+      const request = (state.aiAutomation.recentRequests || []).find(item => item.id === requestId);
+      if (request && request.status === 'PUBLISHED') {
+        await Promise.all([loadTimeline(false), refreshNotifications()]);
+        showToast('AI投稿をタイムラインへ反映しました。');
+        return;
+      }
+      if (request && request.status === 'ERROR') throw new Error(request.errorMessage || 'AI投稿の作成に失敗しました。');
+    }
+    showToast('AI投稿はまだ生成中です。状態の更新から後で確認できます。');
   }
 
   async function handlePersonaAction(event) {
@@ -1011,7 +1225,9 @@
       state.settings = await callApi('apiSaveSettings', {
         displayName: queryOne('#display-name-input').value,
         theme: queryOne('#theme-input').value,
-        pageSize: Number(queryOne('#page-size-input').value)
+        pageSize: Number(queryOne('#page-size-input').value),
+        aiPostIntervalHours: Number(queryOne('#ai-post-frequency-input').value),
+        aiReplyIntervalHours: Number(queryOne('#ai-reply-frequency-input').value)
       });
       applySettings();
       showToast('設定を保存しました。');
@@ -1105,6 +1321,8 @@
 
   function renderFatalError(error) {
     state.posts = [];
+    queryOne('#setup-screen').hidden = true;
+    queryAll('[data-app-ui]').forEach(element => { element.hidden = false; });
     queryOne('#timeline').innerHTML = emptyStateHtml('ぽろったーを開けませんでした', error.message);
     queryOne('#timeline-status').textContent = '';
     showToast(error.message, true);

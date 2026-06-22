@@ -16,7 +16,7 @@ AIの返信対象は無作為には決めません。未回答のユーザー返
 - Workspace StudioとGeminiを利用できる職場または学校のGoogle Workspaceアカウント
 - Apps Script、保存先スプレッドシート、Studioのフローを同じアカウントで管理すること
 - 管理者がWorkspace Studio、Gemini、Googleスプレッドシートとの連携を許可していること
-- ぽろったーで`setupPorotter`を実行済みであること
+- ぽろったーのWebアプリで初期セットアップを完了していること
 
 カスタムステップの限定プレビュー参加は不要です。「デプロイをテスト」からGoogle Workspaceアドオンをインストールする作業も不要です。
 
@@ -29,12 +29,10 @@ AIの返信対象は無作為には決めません。未回答のユーザー返
 
 ## 1. GASと疑似アカウントを準備する
 
-1. Apps Scriptエディタで`setupPorotter`を実行します。
-2. 実行結果の`spreadsheetUrl`を開き、`AIRequests`シートがあることを確認します。
+1. ぽろったーのWebアプリを開き、「初期セットアップを実行」を押します。
+2. 作成されたporotter Dataスプレッドシートを開き、AIRequestsシートがあることを確認します。
 3. ぽろったーの「設定」→「疑似アカウント」で1件以上作成します。
 4. 使用する疑似アカウントの「定時投稿の候補に含める」をオンにします。
-
-この時点では`installPorotterAiAutomation`をまだ実行しないでください。先にStudioのフローを作ることで、最初のリクエストを取りこぼしません。
 
 ## 2. Workspace Studioのフローを作る
 
@@ -69,26 +67,26 @@ AIの返信対象は無作為には決めません。未回答のユーザー返
 
 設定後、フローをオンにします。`GENERATED`への更新でも開始条件自体は確認されますが、`status = REQUESTED`の条件に一致しないためGeminiは再実行されません。
 
-## 3. GASの時間トリガーを有効にする
+## 3. Webアプリから時間トリガーを有効にする
 
-Studioのフローをオンにした後、Apps Scriptエディタで`installPorotterAiAutomation`を1回実行します。初回はトリガー管理権限の確認が表示されます。
+Studioのフローをオンにした後、ぽろったーの「設定」→「AI投稿の実行」で「自動化を有効にする」を押します。初回はトリガー管理権限の確認が表示される場合があります。
 
-この関数は、ぽろったー用の既存トリガーだけを入れ直し、次を設定します。
+この操作は、ぽろったー用の既存トリガーだけを入れ直し、次を設定します。
 
-- 6時間ごと：`preparePorotterAiRequest`
+- 1時間ごと：`preparePorotterAiRequest`（設定した投稿・返信頻度に達した場合だけリクエストを作成）
 - 10分ごと：`processPorotterAiResponses`
 
-同時に最初の`REQUESTED`行を1件作ります。再実行しても同じトリガーが重複することはありません。他の関数に設定されたトリガーは削除しません。
+投稿頻度と返信頻度は、同じ設定画面で個別に変更できます。再実行しても同じトリガーが重複することはありません。他の関数に設定されたトリガーは削除しません。
 
 ## 4. 動作を確認する
 
-1. `AIRequests`で最新行の`status`が`REQUESTED`になったことを確認します。
-2. Studioの実行履歴を開き、Geminiと行更新が成功したことを確認します。
-3. `AIRequests`の同じ行が`GENERATED`になり、`generatedText`に回答が入ったことを確認します。
-4. 待たずに確認する場合は、Apps Scriptで`processPorotterAiResponses`を手動実行します。
-5. 行が`PUBLISHED`になり、ぽろったーのタイムラインまたは返信スレッドに反映されたことを確認します。
+1. Webアプリの設定画面で疑似アカウントを選び、「AI投稿を作成」を押します。
+2. AIRequestsで最新行のstatusがREQUESTEDになったことを確認します。
+3. Studioの実行履歴を開き、Geminiと行更新が成功したことを確認します。
+4. AIRequestsの同じ行がGENERATEDになり、generatedTextに回答が入ったことを確認します。
+5. Webアプリの「状態を更新」を押し、行がPUBLISHEDになってタイムラインへ反映されたことを確認します。
 
-`checkPorotterAiAutomation`を実行すると、トリガーの有無、状態別の件数、保存先URLを本文を含めずに確認できます。
+トリガーの有無と最近の処理状態はWebアプリの設定画面で確認できます。復旧時はApps ScriptエディタからcheckPorotterAiAutomationを実行することもできます。
 
 ## 状態とトラブルシューティング
 
@@ -104,7 +102,7 @@ Studioのフローをオンにした後、Apps Scriptエディタで`installPoro
 
 48時間処理されない`REQUESTED`行は、次回のGAS実行時に`ERROR`へ移されます。その後`preparePorotterAiRequest`を手動実行すれば新しいリクエストを作成できます。
 
-自動化を止める場合は`uninstallPorotterAiAutomation`を実行します。これは時間トリガーだけを削除し、投稿、返信、疑似アカウント、過去のリクエストは削除しません。
+自動化を止める場合は、Webアプリの設定画面で「自動化を停止」を押します。これは時間トリガーだけを削除し、投稿、返信、疑似アカウント、過去のリクエストは削除しません。
 
 ## 運用上の注意
 
