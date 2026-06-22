@@ -192,9 +192,12 @@ function buildNewPostPrompt_(persona) {
     'パーソナリティ: ' + persona.prompt,
     ''
   ].concat(workspaceContextPromptLines_()).concat([
-    '対象内の情報から、仕事の改善・問い直し・次の一手につながるヒントを1つ選んでください。',
+    '対象内の情報から、この人物自身が仕事の中で得た気づきや違和感を1つ選んでください。',
     '機密情報、個人名、顧客名、金額、ファイル本文を直接引用せず、抽象化して書いてください。',
-    '本文は日本語240文字以内。断定しすぎず、この人物らしい視点と口調にしてください。',
+    '読者やユーザーに質問・助言するのではなく、この人物が自分のためにつぶやく独り言として書いてください。',
+    '本文は日本語240文字以内。簡潔に表せる内容は1〜2文で終え、上限まで文字数を埋めないでください。',
+    '疑問形を使う場合も相手への問いかけではなく、自分の中に生まれた問いとして表現してください。',
+    '断定しすぎず、この人物らしい視点と口調にしてください。',
     '該当する最近の情報が見つからない場合は、一般的な業務の振り返りを投稿してください。',
     '',
     '次のJSONだけを返してください。コードブロックや説明は不要です。',
@@ -353,7 +356,7 @@ function parseGeneratedPost_(value) {
   if (Array.from(body).length > CONFIG_.MAX_POST_LENGTH) {
     body = Array.from(body).slice(0, CONFIG_.MAX_POST_LENGTH - 1).join('') + '…';
   }
-  const sourceUrl = normalizeWorkspaceUrl_(parsed.sourceUrl);
+  const sourceUrl = normalizeReferenceUrl_(parsed.sourceUrl);
   return {
     body: body,
     tags: Array.isArray(parsed.tags) ? parsed.tags : String(parsed.tags || '').split(/[,、\s]+/),

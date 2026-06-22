@@ -2,7 +2,7 @@
   const now = Date.now();
   const iso = offsetDays => new Date(now - offsetDays * 86400000).toISOString();
   let posts = [
-    { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2, authorType: 'user', authorName: '' },
+    { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2, authorType: 'user', authorName: '', sourceUrl: 'https://example.com/reference' },
     { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 2, authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
     { id: 'p3', body: '「便利にする」と「考えなくてよくする」は似ているようで違う。ここはもう少し掘りたい。', tags: ['アイデア'], createdAt: iso(9), updatedAt: iso(8), favorite: false, deletedAt: '', replyCount: 1 },
     { id: 'p4', body: '午後の集中力は、タスクの難しさより切り替え回数に削られている気がする。', tags: ['気づき'], createdAt: iso(30), updatedAt: iso(30), favorite: true, deletedAt: '', replyCount: 0 }
@@ -16,7 +16,7 @@
   ];
   let settings = { displayName: 'わたし', email: 'me@example.com', theme: 'system', pageSize: 20, aiPostIntervalHours: 6, aiReplyIntervalHours: 20, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
-    { id: 'persona-1', name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人', prompt: '曖昧な表現や小さな抜けを丁寧に見つけます。', enabled: true, createdAt: iso(2), updatedAt: iso(2) }
+    { id: 'persona-1', name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人', prompt: '曖昧な表現や小さな抜けを丁寧に見つけます。', enabled: true, avatarColor: 'teal', createdAt: iso(2), updatedAt: iso(2) }
   ];
 
   const uuid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -58,14 +58,14 @@
     apiTimeline: filters => timeline(filters),
     apiCreatePost: payload => {
       const stamp = new Date().toISOString();
-      const post = { id: uuid('p'), body: String(payload.body).trim(), tags: payload.tags || [], createdAt: stamp, updatedAt: stamp, favorite: false, deletedAt: '', replyCount: 0, authorType: 'user', authorName: '' };
+      const post = { id: uuid('p'), body: String(payload.body).trim(), tags: payload.tags || [], sourceUrl: payload.sourceUrl || '', createdAt: stamp, updatedAt: stamp, favorite: false, deletedAt: '', replyCount: 0, authorType: 'user', authorName: '' };
       if (!post.body) throw new Error('投稿を入力してください。');
       posts.push(post);
       return post;
     },
     apiUpdatePost: (id, payload) => {
       const post = posts.find(item => item.id === id);
-      Object.assign(post, { body: payload.body, tags: payload.tags || [], updatedAt: new Date().toISOString() });
+      Object.assign(post, { body: payload.body, tags: payload.tags || [], sourceUrl: payload.sourceUrl || '', updatedAt: new Date().toISOString() });
       return post;
     },
     apiDeletePost: id => { const post = posts.find(item => item.id === id); post.deletedAt = new Date().toISOString(); return { id }; },
@@ -113,7 +113,8 @@
         Object.assign(persona, payload, { updatedAt: stamp });
         return persona;
       }
-      const persona = { id: uuid('persona'), ...payload, createdAt: stamp, updatedAt: stamp };
+      const colors = ['violet', 'indigo', 'teal', 'green', 'amber', 'rose'];
+      const persona = { id: uuid('persona'), ...payload, avatarColor: colors[Math.floor(Math.random() * colors.length)], createdAt: stamp, updatedAt: stamp };
       personas.push(persona);
       return persona;
     },

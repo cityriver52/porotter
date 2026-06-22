@@ -24,7 +24,8 @@ const CONFIG_ = Object.freeze({
   AI_REQUEST_PROCESS_LIMIT: 5,
   DEFAULT_AI_POST_INTERVAL_HOURS: 6,
   DEFAULT_AI_REPLY_INTERVAL_HOURS: 20,
-  AI_INTERVAL_HOURS: Object.freeze([0, 6, 12, 20, 24, 48, 72, 168]),
+  AI_INTERVAL_HOURS: Object.freeze([0, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
+  PERSONA_AVATAR_COLORS: Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']),
   AI_REQUEST_STATUS: Object.freeze({
     CREATING: 'CREATING',
     REQUESTED: 'REQUESTED',
@@ -57,7 +58,7 @@ const CONFIG_ = Object.freeze({
       name: 'Personas',
       headers: Object.freeze([
         'id', 'name', 'role', 'prompt', 'enabled',
-        'createdAt', 'updatedAt', 'authorEmail'
+        'createdAt', 'updatedAt', 'authorEmail', 'avatarColor'
       ])
     }),
     AI_REQUESTS: Object.freeze({
@@ -198,9 +199,37 @@ function isValidDateInput_(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
 
-function normalizeWorkspaceUrl_(value) {
+function normalizeReferenceUrl_(value) {
   const url = String(value || '').trim();
-  return /^https:\/\/(?:drive|docs|mail|chat)\.google\.com\//i.test(url) ? url : '';
+  return /^https:\/\/[^\s<>]+$/i.test(url) ? url : '';
+}
+
+function validateReferenceUrl_(value) {
+  const url = String(value || '').trim();
+  if (!url) return '';
+  const normalized = normalizeReferenceUrl_(url);
+  if (!normalized) throw new Error('参考リンクは https:// から始まるURLを入力してください。');
+  return normalized;
+}
+
+function normalizePersonaAvatarColor_(value, personaId) {
+  const color = String(value || '').trim();
+  if (CONFIG_.PERSONA_AVATAR_COLORS.indexOf(color) >= 0) return color;
+  const seed = Array.from(String(personaId || '')).reduce(function (total, character) {
+    return ((total * 31) + character.codePointAt(0)) >>> 0;
+  }, 0);
+  return CONFIG_.PERSONA_AVATAR_COLORS[seed % CONFIG_.PERSONA_AVATAR_COLORS.length];
+}
+
+function randomPersonaAvatarColor_(existingRecords) {
+  const used = (existingRecords || []).map(function (record) {
+    return normalizePersonaAvatarColor_(record.avatarColor, record.id);
+  });
+  const available = CONFIG_.PERSONA_AVATAR_COLORS.filter(function (color) {
+    return used.indexOf(color) < 0;
+  });
+  const candidates = available.length ? available : CONFIG_.PERSONA_AVATAR_COLORS;
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function normalizePersona_(payload) {

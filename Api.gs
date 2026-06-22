@@ -61,7 +61,8 @@ function apiCreatePost(payload) {
       const post = createPostRecord_({
         email: email,
         body: payload && payload.body,
-        tags: payload && payload.tags
+        tags: payload && payload.tags,
+        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl)
       });
       appendRecord_(CONFIG_.SHEETS.POSTS, post);
       return presentPost_(post, 0);
@@ -75,6 +76,7 @@ function apiUpdatePost(postId, payload) {
       const patch = {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
         tags: JSON.stringify(normalizeTags_(payload && payload.tags)),
+        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl),
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, patch);
@@ -236,7 +238,8 @@ function apiSavePersona(personaId, payload) {
         id: makeId_(),
         createdAt: timestamp,
         updatedAt: timestamp,
-        authorEmail: email
+        authorEmail: email,
+        avatarColor: randomPersonaAvatarColor_(recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.PERSONAS), email))
       }, normalized);
       appendRecord_(CONFIG_.SHEETS.PERSONAS, persona);
       return presentPersona_(persona);
@@ -580,7 +583,7 @@ function presentPost_(record, replyCount) {
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || ''),
     sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeWorkspaceUrl_(record.sourceUrl)
+    sourceUrl: normalizeReferenceUrl_(record.sourceUrl)
   };
 }
 
@@ -631,6 +634,7 @@ function presentPersona_(record) {
     role: String(record.role || ''),
     prompt: String(record.prompt || ''),
     enabled: parseBoolean_(record.enabled),
+    avatarColor: normalizePersonaAvatarColor_(record.avatarColor, record.id),
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || '')
   };

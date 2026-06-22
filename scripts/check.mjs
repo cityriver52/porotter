@@ -72,6 +72,12 @@ for (const requiredContext of ['Google Drive', 'Gmail', 'Google Chat', 'フォ�
 for (const requiredUi of ['id="setup-screen"', 'data-view="mine"', 'data-view="notifications"', 'id="manual-ai-post-button"', 'id="ai-post-frequency-input"', 'id="ai-reply-frequency-input"']) {
   if (!index.includes(requiredUi)) errors.push(`Index.html: required web UI is missing: ${requiredUi}`);
 }
+for (const requiredUi of ['id="post-source-url"', 'id="edit-source-url"']) {
+  if (!index.includes(requiredUi)) errors.push(`Index.html: reference-link UI is missing: ${requiredUi}`);
+}
+if (index.includes('id="ai-request-status"') || clientFile.includes('AI投稿の実行履歴')) {
+  errors.push('Manual AI request history should not be rendered in settings');
+}
 for (const requiredClient of ["callApi('apiSetupPorotter'", "callApi('apiNotifications'", "callApi('apiRequestAiPost'"]) {
   if (!clientFile.includes(requiredClient)) errors.push(`JavaScript.html: required API integration is missing: ${requiredClient}`);
 }

@@ -29,9 +29,10 @@ test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   assert.equal(setup.allowedEmail, 'owner@example.com');
   assert.equal(app.checkPorotterSetup().configured, true);
 
-  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'] });
+  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'], sourceUrl: 'https://example.com/reference' });
   assert.equal(first.ok, true);
   assert.deepEqual(Array.from(first.data.tags), ['学び', '違和感']);
+  assert.equal(first.data.sourceUrl, 'https://example.com/reference');
 
   const second = app.apiCreatePost({ body: '=SUM(A1:A2)', tags: ['アイデア'] });
   assert.equal(second.ok, true);
@@ -51,8 +52,9 @@ test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   assert.equal(thread.data.replies.length, 1);
   assert.equal(thread.data.post.replyCount, 1);
 
-  const updated = app.apiUpdatePost(first.data.id, { body: '更新した本文', tags: ['学び'] });
+  const updated = app.apiUpdatePost(first.data.id, { body: '更新した本文', tags: ['学び'], sourceUrl: 'https://example.com/updated' });
   assert.equal(updated.data.body, '更新した本文');
+  assert.equal(updated.data.sourceUrl, 'https://example.com/updated');
 
   assert.equal(app.apiDeletePost(first.data.id).ok, true);
   assert.equal(app.apiTrash().data.posts.length, 1);
@@ -74,6 +76,7 @@ test('validation and authorization are enforced on the server', () => {
   assert.equal(app.apiCreatePost({ body: '   ', tags: [] }).ok, false);
   assert.equal(app.apiCreatePost({ body: 'x'.repeat(281), tags: [] }).ok, false);
   assert.equal(app.apiCreatePost({ body: 'valid', tags: ['1', '2', '3', '4', '5', '6'] }).ok, false);
+  assert.equal(app.apiCreatePost({ body: 'valid', tags: [], sourceUrl: 'javascript:alert(1)' }).ok, false);
 
   app.__setActiveEmail('intruder@example.com');
   const denied = app.apiTimeline({});
@@ -153,6 +156,7 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
     enabled: true
   });
   assert.equal(saved.ok, true);
+  assert.match(saved.data.avatarColor, /^(violet|indigo|teal|green|amber|rose)$/);
   assert.equal(app.apiListPersonas().data.length, 1);
 
   const installed = app.installPorotterAiAutomation();
@@ -191,8 +195,9 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.equal(timeline.data.posts[0].authorName, '経理の見張り番');
   assert.equal(timeline.data.posts[0].sourceUrl, 'https://mail.google.com/mail/u/0/#inbox/example');
   assert.equal(app.apiTimeline({ authorType: 'user' }).data.total, 0);
-  assert.equal(app.normalizeWorkspaceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
-  assert.equal(app.normalizeWorkspaceUrl_('https://evil.example/?next=https://mail.google.com/'), '');
+  assert.equal(app.normalizeReferenceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
+  assert.equal(app.normalizeReferenceUrl_('https://example.com/reference'), 'https://example.com/reference');
+  assert.equal(app.normalizeReferenceUrl_('javascript:alert(1)'), '');
 
   assert.equal(app.apiTogglePersona(saved.data.id).data.enabled, false);
   assert.equal(app.apiDeletePersona(saved.data.id).ok, true);
@@ -221,6 +226,10 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
+  const newPostPrompt = app.buildPersonaGenerationPrompt_(persona, { type: 'post' });
+  assert.match(newPostPrompt, /自分のためにつぶやく独り言/);
+  assert.match(newPostPrompt, /上限まで文字数を埋めない/);
+  assert.match(newPostPrompt, /相手への問いかけではなく/);
 
   const published = app.publishGeneratedPorotter_('owner@example.com', persona.id, replyActivity.context, JSON.stringify({
     targetPostId: first.id,
@@ -239,6 +248,21 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
     'owner@example.com', persona.id, replyActivity.context,
     JSON.stringify({ targetPostId: first.id, body: '重複返信' })
   ), /すでにAIが返信/);
+});
+
+test('new persona accounts receive distinct persisted avatar colors while colors are available', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const first = app.apiSavePersona('', {
+    name: '観察役', role: '観察する人', prompt: '小さな変化を記録します。', enabled: true
+  }).data;
+  const second = app.apiSavePersona('', {
+    name: '整理役', role: '整理する人', prompt: '構造を短く記録します。', enabled: true
+  }).data;
+
+  assert.notEqual(first.avatarColor, second.avatarColor);
+  assert.equal(app.findRecordById_(app.__definitions.PERSONAS, first.id).avatarColor, first.avatarColor);
+  assert.equal(app.findRecordById_(app.__definitions.PERSONAS, second.id).avatarColor, second.avatarColor);
 });
 
 test('notifications cover user posts and AI posts where the user joined the thread', () => {
@@ -287,9 +311,9 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   }).data;
   const settings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 48, aiReplyIntervalHours: 0
+    aiPostIntervalHours: 1, aiReplyIntervalHours: 0
   }).data;
-  assert.equal(settings.aiPostIntervalHours, 48);
+  assert.equal(settings.aiPostIntervalHours, 1);
   assert.equal(settings.aiReplyIntervalHours, 0);
 
   const scheduled = app.preparePorotterAiRequest();
@@ -318,7 +342,7 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   replyApp.apiCreateReply(aiPost.postId, { body: 'ユーザーの回答' });
   replyApp.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 0, aiReplyIntervalHours: 12
+    aiPostIntervalHours: 0, aiReplyIntervalHours: 2
   });
   const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
   assert.equal(forcedPost.actionType, '新規投稿');

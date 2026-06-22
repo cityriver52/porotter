@@ -81,7 +81,7 @@ Studioのフローをオンにした後、ぽろったーの「設定」→「AI
 ## 4. 動作を確認する
 
 1. Webアプリの設定画面で疑似アカウントを選び、「AI投稿を作成」を押します。
-2. AIRequestsで最新行のstatusがREQUESTEDになったことを確認します。
+2. AIRequestsで最新行のstatusがREQUESTEDになったことを確認します。Webアプリの設定画面には過去の実行履歴を表示しません。
 3. Studioの実行履歴を開き、Geminiと行更新が成功したことを確認します。
 4. AIRequestsの同じ行がGENERATEDになり、generatedTextに回答が入ったことを確認します。
 5. Webアプリの「状態を更新」を押し、行がPUBLISHEDになってタイムラインへ反映されたことを確認します。
