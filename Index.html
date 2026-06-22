@@ -10,7 +10,19 @@
   <body>
     <a class="skip-link" href="#main-content">本文へ移動</a>
 
-    <div id="app" class="app-shell" aria-busy="true">
+    <section id="setup-screen" class="setup-screen" hidden>
+      <div class="setup-card">
+        <span class="brand-mark" aria-hidden="true">ぽ</span>
+        <p class="eyebrow">FIRST SETUP</p>
+        <h1>ぽろったーを始める</h1>
+        <p>投稿を保存する専用スプレッドシートと必要なシートを作成します。Workspace Studioのフローは、この後に別途設定します。</p>
+        <div class="setup-account">使用するアカウント：<strong id="setup-email"></strong></div>
+        <button id="setup-button" class="primary-button" type="button">初期セットアップを実行</button>
+        <p class="setup-note">このWebアプリは「自分のみ」がアクセスできる設定で運用してください。</p>
+      </div>
+    </section>
+
+    <div id="app" class="app-shell" aria-busy="true" data-app-ui hidden>
       <aside class="side-nav" aria-label="メインメニュー">
         <div class="brand" aria-label="ぽろったー">
           <span class="brand-mark" aria-hidden="true">ぽ</span>
@@ -21,11 +33,17 @@
           <button class="nav-item active" type="button" data-view="timeline" aria-current="page">
             <span aria-hidden="true">⌂</span><span>ホーム</span>
           </button>
+          <button class="nav-item" type="button" data-view="mine">
+            <span aria-hidden="true">◎</span><span>自分の投稿</span>
+          </button>
           <button class="nav-item" type="button" data-view="search">
             <span aria-hidden="true">⌕</span><span>検索</span>
           </button>
           <button class="nav-item" type="button" data-view="favorites">
             <span aria-hidden="true">♡</span><span>お気に入り</span>
+          </button>
+          <button class="nav-item" type="button" data-view="notifications">
+            <span aria-hidden="true">♢</span><span>通知</span><span class="notification-badge" data-notification-badge hidden>0</span>
           </button>
           <button class="nav-item" type="button" data-view="trash">
             <span aria-hidden="true">♲</span><span>ごみ箱</span>
@@ -52,7 +70,7 @@
         <section id="timeline-view" class="view-panel active" data-view-panel="timeline">
           <header class="column-header">
             <div>
-              <p class="eyebrow">PRIVATE TIMELINE</p>
+              <p id="timeline-eyebrow" class="eyebrow">PRIVATE TIMELINE</p>
               <h1 id="timeline-title">ホーム</h1>
             </div>
             <button id="mobile-theme-button" class="icon-button" type="button" aria-label="テーマを切り替える">◐</button>
@@ -64,6 +82,11 @@
               <h2 id="composer-heading" class="sr-only">新しい投稿</h2>
               <label class="sr-only" for="post-body">いま、何を感じていますか？</label>
               <textarea id="post-body" rows="3" maxlength="280" placeholder="いま、何を感じていますか？" required></textarea>
+
+              <label class="reference-input" for="post-source-url">
+                <span aria-hidden="true">🔗</span>
+                <input id="post-source-url" type="url" inputmode="url" placeholder="参考リンク（任意・https://）" autocomplete="url">
+              </label>
 
               <div id="quick-tags" class="quick-tags" aria-label="クイックタグ">
                 <button type="button" class="tag-toggle" data-quick-tag="アイデア">#アイデア</button>
@@ -140,6 +163,15 @@
           </div>
         </section>
 
+        <section id="notifications-view" class="view-panel" data-view-panel="notifications" hidden>
+          <header class="column-header">
+            <div><p class="eyebrow">REPLIES TO YOU</p><h1>通知</h1></div>
+            <button id="mark-notifications-read" class="text-button" type="button">すべて既読にする</button>
+          </header>
+          <div id="notification-summary" class="timeline-status" role="status" aria-live="polite"></div>
+          <div id="notification-list" class="notification-list"></div>
+        </section>
+
         <section id="trash-view" class="view-panel" data-view-panel="trash" hidden>
           <header class="column-header">
             <div><p class="eyebrow">RECOVERABLE</p><h1>ごみ箱</h1></div>
@@ -176,8 +208,46 @@
                 </select>
               </label>
             </div>
+            <div class="settings-section">
+              <h2>AIの投稿頻度</h2>
+              <p>自動投稿と自動返信を別々に設定します。手動投稿はこの設定に関係なく実行できます。</p>
+              <label>AIの新規投稿
+                <select id="ai-post-frequency-input">
+                  <option value="0">自動投稿しない</option><option value="1">1時間ごと</option><option value="2">2時間ごと</option>
+                  <option value="3">3時間ごと</option><option value="6">6時間ごと</option><option value="12">12時間ごと</option>
+                  <option value="20">20時間ごと</option><option value="24">1日ごと</option><option value="48">2日ごと</option>
+                  <option value="72">3日ごと</option><option value="168">1週間ごと</option>
+                </select>
+              </label>
+              <label>AIの返信
+                <select id="ai-reply-frequency-input">
+                  <option value="0">自動返信しない</option><option value="1">1時間ごと</option><option value="2">2時間ごと</option>
+                  <option value="3">3時間ごと</option><option value="6">6時間ごと</option><option value="12">12時間ごと</option>
+                  <option value="20">20時間ごと</option><option value="24">1日ごと</option><option value="48">2日ごと</option>
+                  <option value="72">3日ごと</option><option value="168">1週間ごと</option>
+                </select>
+              </label>
+            </div>
             <button class="primary-button" type="submit">設定を保存</button>
           </form>
+
+          <section class="settings-card ai-control-card">
+            <div class="settings-section">
+              <div class="settings-heading-row">
+                <div><h2>AI投稿の実行</h2><p>Workspace Studioのフローを有効にした後で、自動化または手動投稿を利用します。</p></div>
+                <span id="ai-automation-status" class="status-pill">確認中</span>
+              </div>
+              <div class="button-row">
+                <button id="ai-install-button" class="secondary-button" type="button">自動化を有効にする</button>
+                <button id="ai-uninstall-button" class="secondary-button" type="button">自動化を停止</button>
+                <button id="ai-refresh-button" class="text-button" type="button">生成結果を反映</button>
+              </div>
+              <div class="manual-ai-row">
+                <label>投稿する疑似アカウント<select id="manual-ai-persona"></select></label>
+                <button id="manual-ai-post-button" class="primary-button" type="button">AI投稿を作成</button>
+              </div>
+            </div>
+          </section>
 
           <section class="settings-card export-card">
             <div class="settings-section">
@@ -239,11 +309,13 @@
       </aside>
     </div>
 
-    <nav class="mobile-nav" aria-label="モバイルメニュー">
+    <nav class="mobile-nav" aria-label="モバイルメニュー" data-app-ui hidden>
       <button class="active" type="button" data-view="timeline"><span aria-hidden="true">⌂</span><small>ホーム</small></button>
+      <button type="button" data-view="mine"><span aria-hidden="true">◎</span><small>自分</small></button>
       <button type="button" data-view="search"><span aria-hidden="true">⌕</span><small>検索</small></button>
       <button type="button" data-view="favorites"><span aria-hidden="true">♡</span><small>お気に入り</small></button>
       <button id="mobile-compose-button" class="mobile-compose-button" type="button" aria-label="新しい投稿">＋</button>
+      <button type="button" data-view="notifications"><span aria-hidden="true">♢</span><small>通知</small><span class="notification-badge" data-notification-badge hidden>0</span></button>
       <button type="button" data-view="trash"><span aria-hidden="true">♲</span><small>ごみ箱</small></button>
       <button type="button" data-view="settings"><span aria-hidden="true">⚙</span><small>設定</small></button>
     </nav>
@@ -264,6 +336,7 @@
         <label class="sr-only" for="edit-body">本文</label>
         <textarea id="edit-body" rows="5" maxlength="280" required></textarea>
         <label id="edit-tags-label" class="field-label" for="edit-tags">タグ<input id="edit-tags" type="text" placeholder="空白区切り"></label>
+        <label id="edit-source-url-label" class="field-label" for="edit-source-url">参考リンク<input id="edit-source-url" type="url" inputmode="url" placeholder="https://example.com/" autocomplete="url"></label>
         <div class="dialog-actions"><button class="secondary-button" type="button" data-close-dialog="edit-dialog">キャンセル</button><button class="primary-button" type="submit">変更を保存</button></div>
       </form>
     </dialog>

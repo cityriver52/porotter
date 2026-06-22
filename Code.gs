@@ -23,7 +23,20 @@ function setupPorotter() {
     throw new Error('Google Workspace のアカウントで setupPorotter を実行してください。');
   }
 
+  return withScriptLock_(function () {
+    return setupPorotterForEmail_(email);
+  });
+}
+
+function setupPorotterForEmail_(email) {
+  const normalizedEmail = normalizeEmail_(email);
+  if (!normalizedEmail) throw new Error('ログイン中のGoogleアカウントを確認できません。');
+
   const properties = PropertiesService.getScriptProperties();
+  const existingOwner = normalizeEmail_(properties.getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL));
+  if (existingOwner && existingOwner !== normalizedEmail) {
+    throw new Error('このアプリは別のアカウントで初期設定済みです。');
+  }
   let spreadsheetId = properties.getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
   let spreadsheet;
 
@@ -38,12 +51,12 @@ function setupPorotter() {
     properties.setProperty(CONFIG_.PROPERTY_SPREADSHEET_ID, spreadsheetId);
   }
 
-  properties.setProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL, email);
   ensureSchema_(spreadsheet);
-  ensureDefaultSettings_(email);
+  properties.setProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL, normalizedEmail);
+  ensureDefaultSettings_(normalizedEmail);
 
   return {
-    allowedEmail: email,
+    allowedEmail: normalizedEmail,
     spreadsheetId: spreadsheetId,
     spreadsheetUrl: spreadsheet.getUrl(),
     message: 'ぽろったーの初期設定が完了しました。'

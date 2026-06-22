@@ -8,20 +8,6 @@ function preparePorotterAiRequest() {
     const email = automationOwnerEmail_();
     ensureSchema_(getSpreadsheet_());
     expireStaleAiRequests_(email);
-
-    const pending = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email)
-      .filter(function (request) {
-        return [CONFIG_.AI_REQUEST_STATUS.CREATING, CONFIG_.AI_REQUEST_STATUS.REQUESTED,
-          CONFIG_.AI_REQUEST_STATUS.GENERATED].indexOf(String(request.status)) >= 0;
-      });
-    if (pending.length) {
-      return {
-        created: false,
-        reason: '処理待ちのAIリクエストがあります。',
-        pendingCount: pending.length
-      };
-    }
-
     const personas = listPersonas_(email).filter(function (persona) { return persona.enabled; });
     if (!personas.length) {
       return {
@@ -32,7 +18,63 @@ function preparePorotterAiRequest() {
     }
 
     const persona = personas[Math.floor(Math.random() * personas.length)];
-    const activity = chooseStudioActivity_(email, persona);
+    const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
+    const settings = readSettings_();
+    const replyInterval = normalizeAiIntervalHours_(
+      settings.aiReplyIntervalHours,
+      CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
+    );
+    const postInterval = normalizeAiIntervalHours_(
+      settings.aiPostIntervalHours,
+      CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS
+    );
+    let activity = null;
+    if (aiRequestDue_(requests, '返信', replyInterval)) {
+      activity = chooseStudioActivity_(email, persona, { only: 'reply' });
+    }
+    if (!activity && aiRequestDue_(requests, '新規投稿', postInterval)) {
+      activity = chooseStudioActivity_(email, persona, { only: 'post' });
+    }
+    if (!activity) {
+      return {
+        created: false,
+        reason: '設定した頻度に達していないか、返信に適した投稿がありません。',
+        pendingCount: pendingAiRequestCount_(requests)
+      };
+    }
+    return createPorotterAiRequest_(email, { persona: persona, activity: activity });
+  });
+}
+
+function createPorotterAiRequest_(email, options) {
+    const requestOptions = options || {};
+    const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
+    const pendingCount = pendingAiRequestCount_(requests);
+    if (pendingCount) {
+      return {
+        created: false,
+        reason: '処理待ちのAIリクエストがあります。',
+        pendingCount: pendingCount
+      };
+    }
+
+    const personas = listPersonas_(email).filter(function (persona) { return persona.enabled; });
+    let persona = requestOptions.persona || null;
+    if (requestOptions.personaId) {
+      persona = personas.find(function (item) { return String(item.id) === String(requestOptions.personaId); }) || null;
+    }
+    if (!persona && !requestOptions.personaId && personas.length) {
+      persona = personas[Math.floor(Math.random() * personas.length)];
+    }
+    if (!persona) {
+      return { created: false, reason: '有効な疑似アカウントがありません。', pendingCount: 0 };
+    }
+
+    let activity = requestOptions.activity || null;
+    if (!activity && requestOptions.activityType === 'post') {
+      activity = chooseStudioActivity_(email, persona, { only: 'post' });
+    }
+    if (!activity) throw new Error('AI投稿または返信の生成対象を決められませんでした。');
     const timestamp = nowIso_();
     const request = {
       id: makeId_(),
@@ -71,7 +113,23 @@ function preparePorotterAiRequest() {
       spreadsheetUrl: getSpreadsheet_().getUrl(),
       queueSheetName: CONFIG_.SHEETS.AI_REQUESTS.name
     };
-  });
+}
+
+function pendingAiRequestCount_(requests) {
+  return (requests || []).filter(function (request) {
+    return [CONFIG_.AI_REQUEST_STATUS.CREATING, CONFIG_.AI_REQUEST_STATUS.REQUESTED,
+      CONFIG_.AI_REQUEST_STATUS.GENERATED].indexOf(String(request.status)) >= 0;
+  }).length;
+}
+
+function aiRequestDue_(requests, actionType, intervalHours) {
+  if (!intervalHours) return false;
+  const latest = (requests || [])
+    .filter(function (request) { return String(request.actionType) === actionType; })
+    .map(function (request) { return new Date(request.createdAt).getTime(); })
+    .filter(Number.isFinite)
+    .sort(function (a, b) { return b - a; })[0];
+  return !latest || Date.now() - latest >= intervalHours * 60 * 60 * 1000;
 }
 
 function processPorotterAiResponses() {
@@ -137,21 +195,19 @@ function installPorotterAiAutomation() {
 
   ScriptApp.newTrigger('preparePorotterAiRequest')
     .timeBased()
-    .everyHours(6)
+    .everyHours(1)
     .create();
   ScriptApp.newTrigger('processPorotterAiResponses')
     .timeBased()
     .everyMinutes(10)
     .create();
 
-  const firstRequest = preparePorotterAiRequest();
   return {
     installed: true,
     ownerEmail: email,
     spreadsheetUrl: getSpreadsheet_().getUrl(),
     queueSheetName: CONFIG_.SHEETS.AI_REQUESTS.name,
-    triggerHandlers: porotterAiTriggerHandlers_(),
-    firstRequest: firstRequest
+    triggerHandlers: porotterAiTriggerHandlers_()
   };
 }
 
@@ -163,12 +219,17 @@ function uninstallPorotterAiAutomation() {
 
 function checkPorotterAiAutomation() {
   const email = automationOwnerEmail_();
+  return buildAiAutomationStatus_(email);
+}
+
+function buildAiAutomationStatus_(email) {
   ensureSchema_(getSpreadsheet_());
   const handlers = porotterAiTriggerHandlers_();
   const installedHandlers = ScriptApp.getProjectTriggers().map(function (trigger) {
     return trigger.getHandlerFunction();
   });
-  const counts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email)
+  const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
+  const counts = requests
     .reduce(function (result, request) {
       const status = String(request.status || 'UNKNOWN');
       result[status] = (result[status] || 0) + 1;
@@ -179,6 +240,18 @@ function checkPorotterAiAutomation() {
     ownerEmail: email,
     triggerHandlers: installedHandlers.filter(function (handler) { return handlers.indexOf(handler) >= 0; }),
     requestCounts: counts,
+    recentRequests: requests.sort(compareCreatedDescending_).slice(0, 10).map(function (request) {
+      return {
+        id: String(request.id || ''),
+        status: String(request.status || ''),
+        personaName: String(request.personaName || ''),
+        actionType: String(request.actionType || ''),
+        targetSummary: String(request.targetSummary || ''),
+        errorMessage: String(request.errorMessage || ''),
+        createdAt: String(request.createdAt || ''),
+        updatedAt: String(request.updatedAt || '')
+      };
+    }),
     spreadsheetUrl: getSpreadsheet_().getUrl(),
     queueSheetName: CONFIG_.SHEETS.AI_REQUESTS.name
   };

@@ -30,6 +30,23 @@ const timelineTargetEnd = client.indexOf('  function handleTimelineKeydown(event
 if (timelineTargetStart < 0 || timelineTargetEnd < 0) throw new Error('Post-card thread navigation helper was not found.');
 vm.runInContext(`${client.slice(timelineTargetStart, timelineTargetEnd)}\nthis.timelinePostIdFromEvent = timelinePostIdFromEvent;`, context);
 
+const postHtmlStart = client.indexOf('  function postHtml(post, options = {})');
+const postHtmlEnd = client.indexOf('  function renderTagFilters()');
+if (postHtmlStart < 0 || postHtmlEnd < 0) throw new Error('Post renderer was not found.');
+const postContext = vm.createContext({});
+vm.runInContext(`
+  const state = { settings: { displayName: 'me' } };
+  const escapeAttr = value => String(value).replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  const escapeHtml = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const formatBody = escapeHtml;
+  const formatExactDate = value => value;
+  const formatRelativeDate = () => 'いま';
+  const initials = value => String(value).slice(0, 2);
+  const personaAvatarColor = () => 'teal';
+  ${client.slice(postHtmlStart, postHtmlEnd)}
+  this.postHtml = postHtml;
+`, postContext);
+
 test('formatBody converts http and www URLs into safe links', () => {
   const html = context.formatBody('確認 https://example.com/path?a=1&b=2。 www.openai.com も。');
 
@@ -94,4 +111,18 @@ test('post-card clicks open threads but interactive controls keep their own acti
   assert.equal(context.timelinePostIdFromEvent({ target: cardTarget }), 'post-123');
   assert.equal(context.timelinePostIdFromEvent({ target: linkTarget }), '');
   assert.equal(context.timelinePostIdFromEvent({ target: null }), '');
+});
+
+test('post cards render separate reference links and account-specific AI colors', () => {
+  const html = postContext.postHtml({
+    id: 'ai-post', body: '短い気づき', tags: [], createdAt: '2026-06-22T00:00:00.000Z',
+    updatedAt: '2026-06-22T00:00:00.000Z', authorType: 'persona', authorId: 'persona-1',
+    authorName: '細部に気づく人', sourceUrl: 'https://docs.google.com/document/d/example', sourceLabel: '参考資料'
+  });
+
+  assert.match(html, /data-avatar-color="teal"/);
+  assert.match(html, /<div class="post-source">参考：/);
+  assert.match(html, /href="https:\/\/docs\.google\.com\/document\/d\/example"/);
+  assert.match(html, />参考資料<\/a>/);
+  assert.match(html, /rel="noopener noreferrer nofollow"/);
 });

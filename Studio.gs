@@ -39,7 +39,8 @@ function publishGeneratedPorotter_(email, personaId, actionContextValue, generat
   };
 }
 
-function chooseStudioActivity_(email, persona) {
+function chooseStudioActivity_(email, persona, options) {
+  const only = String(options && options.only || '');
   const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
     .filter(function (post) { return !post.deletedAt; });
   const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
@@ -61,7 +62,7 @@ function chooseStudioActivity_(email, persona) {
       !answeredReplyIds[String(reply.id)];
   }).sort(compareCreatedAscending_);
 
-  if (pendingUserReplies.length) {
+  if (only !== 'post' && pendingUserReplies.length) {
     const targetReply = pendingUserReplies[0];
     const targetPost = postById[String(targetReply.postId)];
     return {
@@ -73,13 +74,18 @@ function chooseStudioActivity_(email, persona) {
     };
   }
 
+  if (only === 'post') {
+    return { type: 'post', context: { type: 'post' }, targetSummary: '新しい気づきを投稿' };
+  }
+
   const now = Date.now();
-  const cooldownCutoff = now - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const cooldownCutoff = now - (studioReplyCooldownHours_() * 60 * 60 * 1000);
   const recentlyReplied = replies.some(function (reply) {
     return String(reply.authorType || 'user') === 'persona' &&
       !reply.parentReplyId && new Date(reply.createdAt).getTime() >= cooldownCutoff;
   });
   if (recentlyReplied || !posts.length) {
+    if (only === 'reply') return null;
     return { type: 'post', context: { type: 'post' }, targetSummary: '新しい気づきを投稿' };
   }
 
@@ -111,6 +117,7 @@ function chooseStudioActivity_(email, persona) {
     .slice(0, 8)
     .map(function (item) { return item.post; });
   if (!candidates.length) {
+    if (only === 'reply') return null;
     return { type: 'post', context: { type: 'post' }, targetSummary: '返信に適した未完の思考がないため、新しい気づきを投稿' };
   }
   return {
@@ -185,9 +192,12 @@ function buildNewPostPrompt_(persona) {
     'パーソナリティ: ' + persona.prompt,
     ''
   ].concat(workspaceContextPromptLines_()).concat([
-    '対象内の情報から、仕事の改善・問い直し・次の一手につながるヒントを1つ選んでください。',
+    '対象内の情報から、この人物自身が仕事の中で得た気づきや違和感を1つ選んでください。',
     '機密情報、個人名、顧客名、金額、ファイル本文を直接引用せず、抽象化して書いてください。',
-    '本文は日本語240文字以内。断定しすぎず、この人物らしい視点と口調にしてください。',
+    '読者やユーザーに質問・助言するのではなく、この人物が自分のためにつぶやく独り言として書いてください。',
+    '本文は日本語240文字以内。簡潔に表せる内容は1〜2文で終え、上限まで文字数を埋めないでください。',
+    '疑問形を使う場合も相手への問いかけではなく、自分の中に生まれた問いとして表現してください。',
+    '断定しすぎず、この人物らしい視点と口調にしてください。',
     '該当する最近の情報が見つからない場合は、一般的な業務の振り返りを投稿してください。',
     '',
     '次のJSONだけを返してください。コードブロックや説明は不要です。',
@@ -274,7 +284,7 @@ function publishStudioReplyChoice_(email, persona, context, generated) {
   const targetId = candidateIds.indexOf(requestedId) >= 0 ? requestedId : candidateIds[0];
   const post = ownedRecord_(CONFIG_.SHEETS.POSTS, targetId, email);
   assertNotDeleted_(post);
-  const cooldownCutoff = Date.now() - (CONFIG_.STUDIO_REPLY_COOLDOWN_HOURS * 60 * 60 * 1000);
+  const cooldownCutoff = Date.now() - (studioReplyCooldownHours_() * 60 * 60 * 1000);
   const personaReplies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
     .filter(function (reply) {
       return !reply.deletedAt && String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId;
@@ -308,6 +318,15 @@ function publishStudioReply_(email, persona, post, parentReplyId, body) {
   };
 }
 
+function studioReplyCooldownHours_() {
+  const settings = readSettings_();
+  const configured = normalizeAiIntervalHours_(
+    settings.aiReplyIntervalHours,
+    CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
+  );
+  return configured || CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS;
+}
+
 function parseStudioActionContext_(value) {
   if (!value) return { type: 'post' };
   try {
@@ -337,7 +356,7 @@ function parseGeneratedPost_(value) {
   if (Array.from(body).length > CONFIG_.MAX_POST_LENGTH) {
     body = Array.from(body).slice(0, CONFIG_.MAX_POST_LENGTH - 1).join('') + '…';
   }
-  const sourceUrl = normalizeWorkspaceUrl_(parsed.sourceUrl);
+  const sourceUrl = normalizeReferenceUrl_(parsed.sourceUrl);
   return {
     body: body,
     tags: Array.isArray(parsed.tags) ? parsed.tags : String(parsed.tags || '').split(/[,、\s]+/),

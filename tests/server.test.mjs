@@ -10,15 +10,29 @@ function createContext() {
   return createAppsScriptHarness(root).context;
 }
 
+test('the standalone web app can complete first-time setup safely', () => {
+  const app = createContext();
+  assert.equal(app.apiSetupStatus().data.configured, false);
+  const setup = app.apiSetupPorotter();
+  assert.equal(setup.ok, true);
+  assert.equal(setup.data.allowedEmail, 'owner@example.com');
+  assert.equal(app.apiSetupStatus().data.configured, true);
+
+  app.__setActiveEmail('intruder@example.com');
+  assert.equal(app.apiSetupStatus().data.authorized, false);
+  assert.equal(app.apiSetupPorotter().ok, false);
+});
+
 test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   const app = createContext();
   const setup = app.setupPorotter();
   assert.equal(setup.allowedEmail, 'owner@example.com');
   assert.equal(app.checkPorotterSetup().configured, true);
 
-  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'] });
+  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'], sourceUrl: 'https://example.com/reference' });
   assert.equal(first.ok, true);
   assert.deepEqual(Array.from(first.data.tags), ['学び', '違和感']);
+  assert.equal(first.data.sourceUrl, 'https://example.com/reference');
 
   const second = app.apiCreatePost({ body: '=SUM(A1:A2)', tags: ['アイデア'] });
   assert.equal(second.ok, true);
@@ -38,8 +52,9 @@ test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   assert.equal(thread.data.replies.length, 1);
   assert.equal(thread.data.post.replyCount, 1);
 
-  const updated = app.apiUpdatePost(first.data.id, { body: '更新した本文', tags: ['学び'] });
+  const updated = app.apiUpdatePost(first.data.id, { body: '更新した本文', tags: ['学び'], sourceUrl: 'https://example.com/updated' });
   assert.equal(updated.data.body, '更新した本文');
+  assert.equal(updated.data.sourceUrl, 'https://example.com/updated');
 
   assert.equal(app.apiDeletePost(first.data.id).ok, true);
   assert.equal(app.apiTrash().data.posts.length, 1);
@@ -61,6 +76,7 @@ test('validation and authorization are enforced on the server', () => {
   assert.equal(app.apiCreatePost({ body: '   ', tags: [] }).ok, false);
   assert.equal(app.apiCreatePost({ body: 'x'.repeat(281), tags: [] }).ok, false);
   assert.equal(app.apiCreatePost({ body: 'valid', tags: ['1', '2', '3', '4', '5', '6'] }).ok, false);
+  assert.equal(app.apiCreatePost({ body: 'valid', tags: [], sourceUrl: 'javascript:alert(1)' }).ok, false);
 
   app.__setActiveEmail('intruder@example.com');
   const denied = app.apiTimeline({});
@@ -110,6 +126,7 @@ test('timeline filters, pagination, settings and permanent deletion work', () =>
   assert.equal(app.apiTimeline({ tag: '偶数' }).data.total, 4);
   assert.equal(app.apiTimeline({ replyState: 'with' }).data.total, 1);
   assert.equal(app.apiTimeline({ replyState: 'without' }).data.total, 6);
+  assert.equal(app.apiTimeline({ authorType: 'user' }).data.total, 7);
 
   const today = app.Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
   assert.equal(app.apiTimeline({ startDate: today, endDate: today }).data.total, 7);
@@ -139,18 +156,22 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
     enabled: true
   });
   assert.equal(saved.ok, true);
+  assert.match(saved.data.avatarColor, /^(violet|indigo|teal|green|amber|rose)$/);
   assert.equal(app.apiListPersonas().data.length, 1);
 
   const installed = app.installPorotterAiAutomation();
   assert.equal(installed.installed, true);
-  assert.equal(installed.firstRequest.created, true);
   assert.deepEqual(Array.from(app.__getTriggers()).map(trigger => trigger.handlerFunction).sort(), [
     'preparePorotterAiRequest', 'processPorotterAiResponses'
   ]);
+  assert.equal(app.__getTriggers().find(trigger => trigger.handlerFunction === 'preparePorotterAiRequest').schedule.everyHours, 1);
   app.installPorotterAiAutomation();
   assert.equal(app.__getTriggers().length, 2);
 
-  const queued = app.findRecordById_(app.__definitions.AI_REQUESTS, installed.firstRequest.requestId);
+  const manualRequest = app.apiRequestAiPost(saved.data.id);
+  assert.equal(manualRequest.ok, true);
+  assert.equal(manualRequest.data.created, true);
+  const queued = app.findRecordById_(app.__definitions.AI_REQUESTS, manualRequest.data.requestId);
   assert.equal(queued.status, 'REQUESTED');
   assert.equal(queued.personaId, saved.data.id);
   const generationPrompt = queued.generationPrompt;
@@ -173,8 +194,10 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.equal(timeline.data.posts[0].authorType, 'persona');
   assert.equal(timeline.data.posts[0].authorName, '経理の見張り番');
   assert.equal(timeline.data.posts[0].sourceUrl, 'https://mail.google.com/mail/u/0/#inbox/example');
-  assert.equal(app.normalizeWorkspaceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
-  assert.equal(app.normalizeWorkspaceUrl_('https://evil.example/?next=https://mail.google.com/'), '');
+  assert.equal(app.apiTimeline({ authorType: 'user' }).data.total, 0);
+  assert.equal(app.normalizeReferenceUrl_('https://chat.google.com/room/example'), 'https://chat.google.com/room/example');
+  assert.equal(app.normalizeReferenceUrl_('https://example.com/reference'), 'https://example.com/reference');
+  assert.equal(app.normalizeReferenceUrl_('javascript:alert(1)'), '');
 
   assert.equal(app.apiTogglePersona(saved.data.id).data.enabled, false);
   assert.equal(app.apiDeletePersona(saved.data.id).ok, true);
@@ -203,6 +226,10 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
+  const newPostPrompt = app.buildPersonaGenerationPrompt_(persona, { type: 'post' });
+  assert.match(newPostPrompt, /自分のためにつぶやく独り言/);
+  assert.match(newPostPrompt, /上限まで文字数を埋めない/);
+  assert.match(newPostPrompt, /相手への問いかけではなく/);
 
   const published = app.publishGeneratedPorotter_('owner@example.com', persona.id, replyActivity.context, JSON.stringify({
     targetPostId: first.id,
@@ -221,6 +248,110 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
     'owner@example.com', persona.id, replyActivity.context,
     JSON.stringify({ targetPostId: first.id, body: '重複返信' })
   ), /すでにAIが返信/);
+});
+
+test('new persona accounts receive distinct persisted avatar colors while colors are available', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const first = app.apiSavePersona('', {
+    name: '観察役', role: '観察する人', prompt: '小さな変化を記録します。', enabled: true
+  }).data;
+  const second = app.apiSavePersona('', {
+    name: '整理役', role: '整理する人', prompt: '構造を短く記録します。', enabled: true
+  }).data;
+
+  assert.notEqual(first.avatarColor, second.avatarColor);
+  assert.equal(app.findRecordById_(app.__definitions.PERSONAS, first.id).avatarColor, first.avatarColor);
+  assert.equal(app.findRecordById_(app.__definitions.PERSONAS, second.id).avatarColor, second.avatarColor);
+});
+
+test('notifications cover user posts and AI posts where the user joined the thread', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '対話役', role: '議論を深める人', prompt: '次の一歩を返します。', enabled: true
+  }).data;
+  const userPost = app.apiCreatePost({ body: '自分の投稿', tags: [] }).data;
+  app.writeSettings_({ notificationsReadAt: '2000-01-01T00:00:00.000Z' });
+  const baseTime = Date.now() - 5000;
+  const future = new Date(baseTime + 1000).toISOString();
+  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+    postId: userPost.id, email: 'owner@example.com', body: 'AIからの返信', timestamp: future,
+    authorType: 'persona', authorId: persona.id, authorName: persona.name
+  }));
+
+  const aiPost = app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
+    body: 'AIの投稿', tags: []
+  }));
+  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+    postId: aiPost.postId, email: 'owner@example.com', body: '参加前のAI返信',
+    timestamp: new Date(baseTime + 1500).toISOString(), authorType: 'persona', authorId: persona.id, authorName: persona.name
+  }));
+  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+    postId: aiPost.postId, email: 'owner@example.com', body: 'ユーザーが参加',
+    timestamp: new Date(baseTime + 2000).toISOString(), authorType: 'user', authorId: 'owner@example.com', authorName: 'owner'
+  }));
+  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+    postId: aiPost.postId, email: 'owner@example.com', body: '参加後のAI返信',
+    timestamp: new Date(baseTime + 3000).toISOString(), authorType: 'persona', authorId: persona.id, authorName: persona.name
+  }));
+
+  const notifications = app.apiNotifications().data;
+  assert.equal(notifications.items.length, 2);
+  assert.equal(notifications.unreadCount, 2);
+  assert.deepEqual(Array.from(notifications.items.map(item => item.body)), ['参加後のAI返信', 'AIからの返信']);
+  assert.equal(app.apiMarkNotificationsRead().data.unreadCount, 0);
+});
+
+test('AI post and reply intervals are configurable and manual posts bypass the schedule', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '定期投稿者', role: '振り返り役', prompt: '短い気づきを投稿します。', enabled: true
+  }).data;
+  const settings = app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiPostIntervalHours: 1, aiReplyIntervalHours: 0
+  }).data;
+  assert.equal(settings.aiPostIntervalHours, 1);
+  assert.equal(settings.aiReplyIntervalHours, 0);
+
+  const scheduled = app.preparePorotterAiRequest();
+  assert.equal(scheduled.created, true);
+  assert.equal(scheduled.actionType, '新規投稿');
+  const row = app.findRecordById_(app.__definitions.AI_REQUESTS, scheduled.requestId);
+  app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, { status: 'ERROR' });
+  assert.equal(app.preparePorotterAiRequest().created, false);
+
+  app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiPostIntervalHours: 0, aiReplyIntervalHours: 0
+  });
+  const manual = app.apiRequestAiPost(persona.id).data;
+  assert.equal(manual.created, true);
+  assert.equal(manual.actionType, '新規投稿');
+
+  const replyApp = createContext();
+  replyApp.setupPorotter();
+  const replyPersona = replyApp.apiSavePersona('', {
+    name: '返信役', role: '対話役', prompt: 'ユーザーに応答します。', enabled: true
+  }).data;
+  const aiPost = replyApp.publishGeneratedPorotter_('owner@example.com', replyPersona.id, { type: 'post' }, JSON.stringify({
+    body: 'AIからの問い', tags: []
+  }));
+  replyApp.apiCreateReply(aiPost.postId, { body: 'ユーザーの回答' });
+  replyApp.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiPostIntervalHours: 0, aiReplyIntervalHours: 2
+  });
+  const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
+  assert.equal(forcedPost.actionType, '新規投稿');
+  const forcedPostRow = replyApp.findRecordById_(replyApp.__definitions.AI_REQUESTS, forcedPost.requestId);
+  assert.equal(JSON.parse(forcedPostRow.actionContext).type, 'post');
+  replyApp.patchRecord_(replyApp.__definitions.AI_REQUESTS, forcedPostRow._row, { status: 'ERROR' });
+  const scheduledReply = replyApp.preparePorotterAiRequest();
+  assert.equal(scheduledReply.created, true);
+  assert.equal(scheduledReply.actionType, '返信');
 });
 
 test('Workspace Studio prioritizes unanswered user replies to AI posts and does not answer twice', () => {

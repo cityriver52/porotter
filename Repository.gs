@@ -165,5 +165,12 @@ function ensureDefaultSettings_(email) {
   if (!settings.displayName) defaults.displayName = email.split('@')[0];
   if (!settings.theme) defaults.theme = 'system';
   if (!settings.pageSize) defaults.pageSize = String(CONFIG_.DEFAULT_PAGE_SIZE);
+  if (settings.aiPostIntervalHours === undefined) {
+    defaults.aiPostIntervalHours = String(CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS);
+  }
+  if (settings.aiReplyIntervalHours === undefined) {
+    defaults.aiReplyIntervalHours = String(CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS);
+  }
+  if (!settings.notificationsReadAt) defaults.notificationsReadAt = nowIso_();
   if (Object.keys(defaults).length) writeSettings_(defaults);
 }

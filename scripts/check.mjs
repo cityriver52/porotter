@@ -20,6 +20,9 @@ try {
   if (!manifest.oauthScopes?.includes('https://www.googleapis.com/auth/script.scriptapp')) {
     errors.push('appsscript.json: trigger management scope is missing');
   }
+  if (manifest.webapp?.access !== 'MYSELF') {
+    errors.push('appsscript.json: first-time web setup requires MYSELF access');
+  }
 } catch (error) {
   errors.push(`appsscript.json: ${error.message}`);
 }
@@ -40,6 +43,9 @@ for (const partial of ['Styles', 'JavaScript']) {
 const ids = Array.from(index.matchAll(/\bid="([^"]+)"/g), match => match[1]);
 const duplicateIds = ids.filter((id, indexOfId) => ids.indexOf(id) !== indexOfId);
 if (duplicateIds.length) errors.push(`Index.html: duplicate IDs: ${[...new Set(duplicateIds)].join(', ')}`);
+const referencedIds = Array.from(clientFile.matchAll(/queryOne\(['"]#([A-Za-z0-9_-]+)['"]/g), match => match[1]);
+const missingReferencedIds = [...new Set(referencedIds.filter(id => !ids.includes(id)))];
+if (missingReferencedIds.length) errors.push(`JavaScript.html references missing DOM IDs: ${missingReferencedIds.join(', ')}`);
 
 const timelineView = index.slice(index.indexOf('id="timeline-view"'), index.indexOf('id="search-view"'));
 const searchView = index.slice(index.indexOf('id="search-view"'), index.indexOf('id="trash-view"'));
@@ -63,8 +69,20 @@ const studioFile = fs.readFileSync(path.join(root, 'Studio.gs'), 'utf8');
 for (const requiredContext of ['Google Drive', 'Gmail', 'Google Chat', 'フォローしていないスレッド', 'フォロー状態を確認できない返信']) {
   if (!studioFile.includes(requiredContext)) errors.push(`Studio.gs: Workspace context rule is missing: ${requiredContext}`);
 }
+for (const requiredUi of ['id="setup-screen"', 'data-view="mine"', 'data-view="notifications"', 'id="manual-ai-post-button"', 'id="ai-post-frequency-input"', 'id="ai-reply-frequency-input"']) {
+  if (!index.includes(requiredUi)) errors.push(`Index.html: required web UI is missing: ${requiredUi}`);
+}
+for (const requiredUi of ['id="post-source-url"', 'id="edit-source-url"']) {
+  if (!index.includes(requiredUi)) errors.push(`Index.html: reference-link UI is missing: ${requiredUi}`);
+}
+if (index.includes('id="ai-request-status"') || clientFile.includes('AI投稿の実行履歴')) {
+  errors.push('Manual AI request history should not be rendered in settings');
+}
+for (const requiredClient of ["callApi('apiSetupPorotter'", "callApi('apiNotifications'", "callApi('apiRequestAiPost'"]) {
+  if (!clientFile.includes(requiredClient)) errors.push(`JavaScript.html: required API integration is missing: ${requiredClient}`);
+}
 const automationFile = fs.readFileSync(path.join(root, 'Automation.gs'), 'utf8');
-for (const requiredToken of ['AI_REQUEST_STATUS.REQUESTED', 'AI_REQUEST_STATUS.GENERATED', 'AI_REQUEST_STATUS.PUBLISHED', 'everyHours(6)', 'everyMinutes(10)']) {
+for (const requiredToken of ['AI_REQUEST_STATUS.REQUESTED', 'AI_REQUEST_STATUS.GENERATED', 'AI_REQUEST_STATUS.PUBLISHED', 'everyHours(1)', 'everyMinutes(10)']) {
   if (!automationFile.includes(requiredToken)) errors.push(`Automation.gs: queue automation is incomplete: ${requiredToken}`);
 }
 

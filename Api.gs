@@ -2,6 +2,38 @@
  * Public API functions called from the HTML client.
  * Every endpoint authenticates independently and returns a stable envelope.
  */
+function apiSetupStatus() {
+  try {
+    migrateLegacyProperties_();
+    const email = currentUserEmail_();
+    const properties = PropertiesService.getScriptProperties();
+    const owner = normalizeEmail_(properties.getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL));
+    const spreadsheetId = properties.getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
+    return {
+      ok: true,
+      data: {
+        configured: Boolean(owner && spreadsheetId),
+        authorized: !owner || owner === email,
+        email: email
+      }
+    };
+  } catch (error) {
+    return { ok: false, error: String(error && error.message || '初期設定の状態を確認できませんでした。') };
+  }
+}
+
+function apiSetupPorotter() {
+  try {
+    const email = currentUserEmail_();
+    const result = withScriptLock_(function () {
+      return setupPorotterForEmail_(email);
+    });
+    return { ok: true, data: result };
+  } catch (error) {
+    return { ok: false, error: String(error && error.message || '初期設定に失敗しました。') };
+  }
+}
+
 function apiBootstrap(filters) {
   return runApi_(function (email) {
     ensureSchema_(getSpreadsheet_());
@@ -11,7 +43,9 @@ function apiBootstrap(filters) {
       timeline: buildTimeline_(filters || {}, snapshot),
       settings: publicSettings_(snapshot.settings, email),
       discovery: buildDiscovery_(snapshot),
-      personas: listPersonas_(email, snapshot.personas)
+      personas: listPersonas_(email, snapshot.personas),
+      notifications: buildNotifications_(email, snapshot),
+      aiAutomation: publicAiAutomationStatus_(buildAiAutomationStatus_(email))
     };
   });
 }
@@ -27,7 +61,8 @@ function apiCreatePost(payload) {
       const post = createPostRecord_({
         email: email,
         body: payload && payload.body,
-        tags: payload && payload.tags
+        tags: payload && payload.tags,
+        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl)
       });
       appendRecord_(CONFIG_.SHEETS.POSTS, post);
       return presentPost_(post, 0);
@@ -41,6 +76,7 @@ function apiUpdatePost(postId, payload) {
       const patch = {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
         tags: JSON.stringify(normalizeTags_(payload && payload.tags)),
+        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl),
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, patch);
@@ -202,7 +238,8 @@ function apiSavePersona(personaId, payload) {
         id: makeId_(),
         createdAt: timestamp,
         updatedAt: timestamp,
-        authorEmail: email
+        authorEmail: email,
+        avatarColor: randomPersonaAvatarColor_(recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.PERSONAS), email))
       }, normalized);
       appendRecord_(CONFIG_.SHEETS.PERSONAS, persona);
       return presentPersona_(persona);
@@ -237,8 +274,68 @@ function apiSaveSettings(payload) {
         ? payload.theme
         : 'system';
       const pageSize = clampInteger_(payload && payload.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
-      writeSettings_({ displayName: displayName, theme: theme, pageSize: String(pageSize) });
-      return publicSettings_({ displayName: displayName, theme: theme, pageSize: String(pageSize) }, email);
+      const aiPostIntervalHours = normalizeAiIntervalHours_(
+        payload && payload.aiPostIntervalHours,
+        CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS
+      );
+      const aiReplyIntervalHours = normalizeAiIntervalHours_(
+        payload && payload.aiReplyIntervalHours,
+        CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
+      );
+      const updates = {
+        displayName: displayName,
+        theme: theme,
+        pageSize: String(pageSize),
+        aiPostIntervalHours: String(aiPostIntervalHours),
+        aiReplyIntervalHours: String(aiReplyIntervalHours)
+      };
+      writeSettings_(updates);
+      return publicSettings_(Object.assign({}, readSettings_(), updates), email);
+  });
+}
+
+function apiNotifications() {
+  return runApi_(function (email) {
+    return buildNotifications_(email, createNotificationSnapshot_());
+  });
+}
+
+function apiMarkNotificationsRead() {
+  return runLockedApi_(function (email) {
+    writeSettings_({ notificationsReadAt: nowIso_() });
+    return buildNotifications_(email, createNotificationSnapshot_());
+  });
+}
+
+function apiGetAiAutomationStatus() {
+  return runApi_(function (email) {
+    return publicAiAutomationStatus_(buildAiAutomationStatus_(email));
+  });
+}
+
+function apiInstallAiAutomation() {
+  return runApi_(function () {
+    return installPorotterAiAutomation();
+  });
+}
+
+function apiUninstallAiAutomation() {
+  return runApi_(function () {
+    return uninstallPorotterAiAutomation();
+  });
+}
+
+function apiRequestAiPost(personaId) {
+  return runLockedApi_(function (email) {
+    ensureSchema_(getSpreadsheet_());
+    expireStaleAiRequests_(email);
+    return createPorotterAiRequest_(email, { activityType: 'post', personaId: personaId, manual: true });
+  });
+}
+
+function apiProcessAiResponses() {
+  return runApi_(function () {
+    return processPorotterAiResponses();
   });
 }
 
@@ -327,6 +424,7 @@ function buildTimeline_(rawFilters, snapshot) {
     if (query && searchable.indexOf(query) < 0) return false;
     if (tag && !tags.some(function (item) { return item.toLocaleLowerCase() === tag; })) return false;
     if (parseBoolean_(filters.favoriteOnly) && !parseBoolean_(post.favorite)) return false;
+    if (filters.authorType === 'user' && String(post.authorType || 'user') === 'persona') return false;
     if (filters.replyState === 'with' && !(replyCounts[String(post.id)] > 0)) return false;
     if (filters.replyState === 'without' && replyCounts[String(post.id)] > 0) return false;
     if (startDate && createdDate < startDate) return false;
@@ -392,6 +490,73 @@ function buildDiscovery_(snapshot) {
   };
 }
 
+function buildNotifications_(email, snapshot) {
+  const source = snapshot || createReadSnapshot_();
+  const posts = recordsOwnedBy_(source.posts || [], email).filter(function (post) { return !post.deletedAt; });
+  const replies = recordsOwnedBy_(source.replies || [], email).filter(function (reply) { return !reply.deletedAt; });
+  const postById = posts.reduce(function (result, post) {
+    result[String(post.id)] = post;
+    return result;
+  }, {});
+  const firstUserReplyAt = replies.reduce(function (result, reply) {
+    if (String(reply.authorType || 'user') === 'persona') return result;
+    const postId = String(reply.postId);
+    if (!result[postId] || String(reply.createdAt) < result[postId]) {
+      result[postId] = String(reply.createdAt);
+    }
+    return result;
+  }, {});
+  const settings = source.settings || readSettings_();
+  const readAt = String(settings.notificationsReadAt || '');
+  const items = replies
+    .filter(function (reply) {
+      if (String(reply.authorType || 'user') !== 'persona') return false;
+      const post = postById[String(reply.postId)];
+      if (!post) return false;
+      if (String(post.authorType || 'user') !== 'persona') return true;
+      const participatedAt = firstUserReplyAt[String(post.id)];
+      return Boolean(participatedAt && participatedAt < String(reply.createdAt));
+    })
+    .sort(compareCreatedDescending_)
+    .slice(0, 100)
+    .map(function (reply) {
+      const post = postById[String(reply.postId)];
+      return {
+        id: String(reply.id),
+        postId: String(reply.postId),
+        replyId: String(reply.id),
+        authorName: String(reply.authorName || 'AIアカウント'),
+        body: String(reply.body || ''),
+        postBody: String(post && post.body || ''),
+        createdAt: String(reply.createdAt || ''),
+        unread: !readAt || String(reply.createdAt || '') > readAt
+      };
+    });
+  return {
+    items: items,
+    unreadCount: items.filter(function (item) { return item.unread; }).length,
+    readAt: readAt
+  };
+}
+
+function createNotificationSnapshot_() {
+  return {
+    posts: readRecords_(CONFIG_.SHEETS.POSTS),
+    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
+    settings: readSettings_()
+  };
+}
+
+function publicAiAutomationStatus_(status) {
+  return {
+    installed: Boolean(status && status.installed),
+    requestCounts: Object.assign({}, status && status.requestCounts || {}),
+    recentRequests: (status && status.recentRequests || []).map(function (request) {
+      return Object.assign({}, request);
+    })
+  };
+}
+
 function ownedRecord_(definition, id, email) {
   const record = findRecordById_(definition, id);
   if (normalizeEmail_(record.authorEmail) !== normalizeEmail_(email)) {
@@ -418,7 +583,7 @@ function presentPost_(record, replyCount) {
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || ''),
     sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeWorkspaceUrl_(record.sourceUrl)
+    sourceUrl: normalizeReferenceUrl_(record.sourceUrl)
   };
 }
 
@@ -442,6 +607,8 @@ function publicSettings_(settings, email) {
     email: email,
     theme: ['system', 'light', 'dark'].indexOf(settings.theme) >= 0 ? settings.theme : 'system',
     pageSize: clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE),
+    aiPostIntervalHours: normalizeAiIntervalHours_(settings.aiPostIntervalHours, CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS),
+    aiReplyIntervalHours: normalizeAiIntervalHours_(settings.aiReplyIntervalHours, CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS),
     maxPostLength: CONFIG_.MAX_POST_LENGTH,
     maxReplyLength: CONFIG_.MAX_REPLY_LENGTH,
     maxTags: CONFIG_.MAX_TAGS,
@@ -467,6 +634,7 @@ function presentPersona_(record) {
     role: String(record.role || ''),
     prompt: String(record.prompt || ''),
     enabled: parseBoolean_(record.enabled),
+    avatarColor: normalizePersonaAvatarColor_(record.avatarColor, record.id),
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || '')
   };
