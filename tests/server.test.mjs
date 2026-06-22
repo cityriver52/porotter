@@ -127,7 +127,7 @@ test('timeline filters, pagination, settings and permanent deletion work', () =>
   assert.equal(app.apiTimeline({}).data.total, 6);
 });
 
-test('personas and Workspace Studio custom steps create attributed AI posts', () => {
+test('the GAS queue and standard Workspace Studio handoff create attributed AI posts', () => {
   const app = createContext();
   const setup = app.setupPorotter();
   assert.match(setup.message, /ぽろったー/);
@@ -141,10 +141,19 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.equal(saved.ok, true);
   assert.equal(app.apiListPersonas().data.length, 1);
 
-  const picked = app.onExecutePickPorotterPersona();
-  const pickedMap = picked.hostAppAction.workflowAction.variableDataMap;
-  assert.equal(pickedMap.personaId.stringValues[0], saved.data.id);
-  const generationPrompt = pickedMap.generationPrompt.stringValues[0];
+  const installed = app.installPorotterAiAutomation();
+  assert.equal(installed.installed, true);
+  assert.equal(installed.firstRequest.created, true);
+  assert.deepEqual(Array.from(app.__getTriggers()).map(trigger => trigger.handlerFunction).sort(), [
+    'preparePorotterAiRequest', 'processPorotterAiResponses'
+  ]);
+  app.installPorotterAiAutomation();
+  assert.equal(app.__getTriggers().length, 2);
+
+  const queued = app.findRecordById_(app.__definitions.AI_REQUESTS, installed.firstRequest.requestId);
+  assert.equal(queued.status, 'REQUESTED');
+  assert.equal(queued.personaId, saved.data.id);
+  const generationPrompt = queued.generationPrompt;
   assert.match(generationPrompt, /過去7日/);
   assert.match(generationPrompt, /Google Drive/);
   assert.match(generationPrompt, /Gmail/);
@@ -152,17 +161,13 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.match(generationPrompt, /フォローしていないスレッドへの返信を必ず無視/);
   assert.match(generationPrompt, /フォロー状態を確認できない返信も対象外/);
 
-  const published = app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [saved.data.id] },
-          generatedText: { stringValues: [JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の連絡', sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/example' })] }
-        }
-      }
-    }
+  app.patchRecord_(app.__definitions.AI_REQUESTS, queued._row, {
+    status: 'GENERATED',
+    generatedText: JSON.stringify({ body: '支払時期だけでなく、確認の締切も先に置くと手戻りを減らせそう。', tags: ['経理', 'AIの視点'], sourceLabel: '最近の連絡', sourceUrl: 'https://mail.google.com/mail/u/0/#inbox/example' })
   });
-  assert.ok(published.hostAppAction.workflowAction.variableDataMap.postId.stringValues[0]);
+  const processed = app.processPorotterAiResponses();
+  assert.equal(processed.publishedCount, 1);
+  assert.equal(app.findRecordById_(app.__definitions.AI_REQUESTS, queued.id).status, 'PUBLISHED');
   const timeline = app.apiTimeline({});
   assert.equal(timeline.data.total, 1);
   assert.equal(timeline.data.posts[0].authorType, 'persona');
@@ -176,7 +181,7 @@ test('personas and Workspace Studio custom steps create attributed AI posts', ()
   assert.equal(app.apiListPersonas().data.length, 0);
 });
 
-test('Workspace Studio chooses unfinished thoughts instead of replying by chance', () => {
+test('designed serendipity chooses unfinished thoughts instead of replying by chance', () => {
   const app = createContext();
   app.setupPorotter();
   const persona = app.apiSavePersona('', {
@@ -199,41 +204,23 @@ test('Workspace Studio chooses unfinished thoughts instead of replying by chance
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
 
-  const published = app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [persona.id] },
-          actionContext: { stringValues: [JSON.stringify(replyActivity.context)] },
-          generatedText: { stringValues: [JSON.stringify({
-            targetPostId: first.id,
-            body: '手順を守ることと目的を満たすことを分けてみると、残すべき工程が見えそうです。次回は「この工程がないと誰が困るか」から確かめてはどうでしょう。'
-          })] }
-        }
-      }
-    }
-  });
-  const output = published.hostAppAction.workflowAction.variableDataMap;
-  assert.equal(output.entryType.stringValues[0], 'reply');
-  assert.equal(output.postId.stringValues[0], first.id);
-  assert.ok(output.replyId.stringValues[0]);
+  const published = app.publishGeneratedPorotter_('owner@example.com', persona.id, replyActivity.context, JSON.stringify({
+    targetPostId: first.id,
+    body: '手順を守ることと目的を満たすことを分けてみると、残すべき工程が見えそうです。次回は「この工程がないと誰が困るか」から確かめてはどうでしょう。'
+  }));
+  assert.equal(published.entryType, 'reply');
+  assert.equal(published.postId, first.id);
+  assert.ok(published.replyId);
   const thread = app.apiThread(first.id).data;
   assert.equal(thread.replies.length, 1);
   assert.equal(thread.replies[0].authorType, 'persona');
   assert.equal(thread.replies[0].authorName, persona.name);
   assert.equal(thread.replies[0].parentReplyId, '');
   assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
-  assert.throws(() => app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [persona.id] },
-          actionContext: { stringValues: [JSON.stringify(replyActivity.context)] },
-          generatedText: { stringValues: [JSON.stringify({ targetPostId: first.id, body: '重複返信' })] }
-        }
-      }
-    }
-  }), /すでにAIが返信/);
+  assert.throws(() => app.publishGeneratedPorotter_(
+    'owner@example.com', persona.id, replyActivity.context,
+    JSON.stringify({ targetPostId: first.id, body: '重複返信' })
+  ), /すでにAIが返信/);
 });
 
 test('Workspace Studio prioritizes unanswered user replies to AI posts and does not answer twice', () => {
@@ -245,17 +232,11 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
     prompt: '小さく試せる具体策を返します。',
     enabled: true
   }).data;
-  const aiPostResult = app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [persona.id] },
-          generatedText: { stringValues: [JSON.stringify({ body: '引き継ぎ資料は、情報量より最初の10分で迷わない順番が大切かもしれない。', tags: ['引き継ぎ'] })] }
-        }
-      }
-    }
-  });
-  const aiPostId = aiPostResult.hostAppAction.workflowAction.variableDataMap.postId.stringValues[0];
+  const aiPostResult = app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
+    body: '引き継ぎ資料は、情報量より最初の10分で迷わない順番が大切かもしれない。',
+    tags: ['引き継ぎ']
+  }));
+  const aiPostId = aiPostResult.postId;
   const userReply = app.apiCreateReply(aiPostId, { body: '最初に何を確認すれば迷いにくいでしょう？' }).data;
 
   const priorityActivity = app.chooseStudioActivity_('owner@example.com', persona);
@@ -267,17 +248,9 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   assert.match(priorityPrompt, /Gmail/);
   assert.match(priorityPrompt, /フォロー状態を確認できない返信も対象外/);
 
-  app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [persona.id] },
-          actionContext: { stringValues: [JSON.stringify(priorityActivity.context)] },
-          generatedText: { stringValues: [JSON.stringify({ body: 'まず「今日中に自分で進めること」と「誰かに聞くこと」を分ける案内があると、最初の10分で立ち止まりにくくなります。' })] }
-        }
-      }
-    }
-  });
+  app.publishGeneratedPorotter_('owner@example.com', persona.id, priorityActivity.context, JSON.stringify({
+    body: 'まず「今日中に自分で進めること」と「誰かに聞くこと」を分ける案内があると、最初の10分で立ち止まりにくくなります。'
+  }));
 
   const thread = app.apiThread(aiPostId).data;
   assert.equal(thread.replies.length, 2);
@@ -285,15 +258,7 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   assert.equal(thread.replies[1].parentReplyId, userReply.id);
   assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
 
-  assert.throws(() => app.onExecutePublishPorotterPost({
-    workflow: {
-      actionInvocation: {
-        inputs: {
-          personaId: { stringValues: [persona.id] },
-          actionContext: { stringValues: [JSON.stringify(priorityActivity.context)] },
-          generatedText: { stringValues: [JSON.stringify({ body: '重複返信' })] }
-        }
-      }
-    }
-  }), /すでにAIが返信/);
+  assert.throws(() => app.publishGeneratedPorotter_(
+    'owner@example.com', persona.id, priorityActivity.context, JSON.stringify({ body: '重複返信' })
+  ), /すでにAIが返信/);
 });

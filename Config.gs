@@ -20,6 +20,15 @@ const CONFIG_ = Object.freeze({
   STUDIO_REPLY_COOLDOWN_HOURS: 20,
   STUDIO_REPLY_THEME_WINDOW_DAYS: 21,
   STUDIO_REPLY_MAX_POST_AGE_DAYS: 45,
+  AI_REQUEST_STALE_HOURS: 48,
+  AI_REQUEST_PROCESS_LIMIT: 5,
+  AI_REQUEST_STATUS: Object.freeze({
+    CREATING: 'CREATING',
+    REQUESTED: 'REQUESTED',
+    GENERATED: 'GENERATED',
+    PUBLISHED: 'PUBLISHED',
+    ERROR: 'ERROR'
+  }),
   SHEETS: Object.freeze({
     POSTS: Object.freeze({
       name: 'Posts',
@@ -45,6 +54,15 @@ const CONFIG_ = Object.freeze({
       name: 'Personas',
       headers: Object.freeze([
         'id', 'name', 'role', 'prompt', 'enabled',
+        'createdAt', 'updatedAt', 'authorEmail'
+      ])
+    }),
+    AI_REQUESTS: Object.freeze({
+      name: 'AIRequests',
+      headers: Object.freeze([
+        'id', 'status', 'personaId', 'personaName', 'actionType',
+        'targetSummary', 'actionContext', 'generationPrompt', 'generatedText',
+        'resultType', 'resultPostId', 'resultReplyId', 'errorMessage',
         'createdAt', 'updatedAt', 'authorEmail'
       ])
     })

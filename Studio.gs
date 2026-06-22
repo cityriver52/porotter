@@ -1,108 +1,42 @@
 /**
- * Google Workspace Studio custom steps for porotter.
- * These steps keep generation and storage inside Google Workspace.
+ * Selection, prompting and publishing logic shared by the GAS automation queue.
+ * Gemini generation itself is handled by standard Google Workspace Studio steps.
  */
 
-function onConfigPickPorotterPersona() {
-  return studioPushCard_({
-    sections: [{
-      header: '投稿または返信を準備する',
-      widgets: [
-        { textParagraph: { text: '疑似アカウントと今回の動作を選び、Gemini用のプロンプトを出力します。未回答のユーザー返信を最優先し、それ以外は問い・違和感・反復テーマなどから、今返す価値がある投稿だけを返信候補にします。' } },
-        { buttonList: { buttons: [studioSaveButton_()] } }
-      ]
-    }]
-  });
-}
-
-function onExecutePickPorotterPersona() {
-  const email = assertAuthorized_();
-  ensureSchema_(getSpreadsheet_());
-  const personas = listPersonas_(email).filter(function (persona) { return persona.enabled; });
-  if (!personas.length) {
-    throw new Error('有効な疑似アカウントがありません。ぽろったーの設定画面で作成してください。');
+function publishGeneratedPorotter_(email, personaId, actionContextValue, generatedText) {
+  const actionContext = typeof actionContextValue === 'string'
+    ? parseStudioActionContext_(actionContextValue)
+    : (actionContextValue || { type: 'post' });
+  const personaRecord = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
+  if (!parseBoolean_(personaRecord.enabled)) {
+    throw new Error('選ばれた疑似アカウントは現在無効です。');
   }
-  const persona = personas[Math.floor(Math.random() * personas.length)];
-  const activity = chooseStudioActivity_(email, persona);
-  return studioOutputVariables_({
-    personaId: studioStringValue_(persona.id),
-    personaName: studioStringValue_(persona.name),
-    personaRole: studioStringValue_(persona.role),
-    personaPrompt: studioStringValue_(persona.prompt),
-    actionType: studioStringValue_(activity.type === 'post' ? '新規投稿' : '返信'),
-    actionContext: studioStringValue_(JSON.stringify(activity.context)),
-    targetSummary: studioStringValue_(activity.targetSummary || '新しい気づきを投稿'),
-    generationPrompt: studioStringValue_(buildPersonaGenerationPrompt_(persona, activity))
+  const persona = presentPersona_(personaRecord);
+  const generated = parseGeneratedPost_(generatedText);
+  if (actionContext.type === 'reply-to-user') {
+    return publishStudioReplyToUser_(email, persona, actionContext, generated);
+  }
+  if (actionContext.type === 'reply-choice') {
+    return publishStudioReplyChoice_(email, persona, actionContext, generated);
+  }
+  const post = createPostRecord_({
+    email: email,
+    body: generated.body,
+    tags: generated.tags,
+    authorType: 'persona',
+    authorId: persona.id,
+    authorName: persona.name,
+    sourceLabel: generated.sourceLabel,
+    sourceUrl: generated.sourceUrl
   });
-}
-
-function onConfigPublishPorotterPost() {
-  const variableSource = { workflowDataSource: { includeVariables: true } };
-  return studioPushCard_({
-    sections: [{
-      header: 'ぽろったーへ投稿・返信する',
-      widgets: [
-        {
-          textInput: {
-            name: 'personaId',
-            label: '疑似アカウントID',
-            hostAppDataSource: variableSource
-          }
-        },
-        {
-          textInput: {
-            name: 'actionContext',
-            label: '動作コンテキスト',
-            type: 'MULTIPLE_LINE',
-            hostAppDataSource: variableSource
-          }
-        },
-        {
-          textInput: {
-            name: 'generatedText',
-            label: 'Geminiの回答',
-            type: 'MULTIPLE_LINE',
-            hostAppDataSource: variableSource
-          }
-        },
-        { buttonList: { buttons: [studioSaveButton_()] } }
-      ]
-    }]
-  });
-}
-
-function onExecutePublishPorotterPost(event) {
-  const email = assertAuthorized_();
-  const personaId = studioInputString_(event, 'personaId');
-  const generatedText = studioInputString_(event, 'generatedText');
-  const actionContext = parseStudioActionContext_(studioOptionalInputString_(event, 'actionContext'));
-  return withScriptLock_(function () {
-    ensureSchema_(getSpreadsheet_());
-    const personaRecord = ownedRecord_(CONFIG_.SHEETS.PERSONAS, personaId, email);
-    if (!parseBoolean_(personaRecord.enabled)) {
-      throw new Error('選ばれた疑似アカウントは現在無効です。');
-    }
-    const persona = presentPersona_(personaRecord);
-    const generated = parseGeneratedPost_(generatedText);
-    if (actionContext.type === 'reply-to-user') {
-      return publishStudioReplyToUser_(email, persona, actionContext, generated);
-    }
-    if (actionContext.type === 'reply-choice') {
-      return publishStudioReplyChoice_(email, persona, actionContext, generated);
-    }
-    const post = createPostRecord_({
-      email: email,
-      body: generated.body,
-      tags: generated.tags,
-      authorType: 'persona',
-      authorId: persona.id,
-      authorName: persona.name,
-      sourceLabel: generated.sourceLabel,
-      sourceUrl: generated.sourceUrl
-    });
-    appendRecord_(CONFIG_.SHEETS.POSTS, post);
-    return studioPublishResult_('post', post.id, '', persona.name, post.body);
-  });
+  appendRecord_(CONFIG_.SHEETS.POSTS, post);
+  return {
+    entryType: 'post',
+    postId: post.id,
+    replyId: '',
+    authorName: persona.name,
+    body: post.body
+  };
 }
 
 function chooseStudioActivity_(email, persona) {
@@ -365,17 +299,13 @@ function publishStudioReply_(email, persona, post, parentReplyId, body) {
     authorName: persona.name
   });
   appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
-  return studioPublishResult_('reply', post.id, reply.id, persona.name, reply.body);
-}
-
-function studioPublishResult_(entryType, postId, replyId, authorName, body) {
-  return studioOutputVariables_({
-    entryType: studioStringValue_(entryType),
-    postId: studioStringValue_(postId),
-    replyId: studioStringValue_(replyId),
-    authorName: studioStringValue_(authorName),
-    body: studioStringValue_(body)
-  });
+  return {
+    entryType: 'reply',
+    postId: post.id,
+    replyId: reply.id,
+    authorName: persona.name,
+    body: reply.body
+  };
 }
 
 function parseStudioActionContext_(value) {
@@ -414,45 +344,5 @@ function parseGeneratedPost_(value) {
     sourceLabel: String(parsed.sourceLabel || '').trim().slice(0, 120),
     sourceUrl: sourceUrl,
     targetPostId: String(parsed.targetPostId || '').trim()
-  };
-}
-
-function studioInputString_(event, id) {
-  const inputs = event && event.workflow && event.workflow.actionInvocation && event.workflow.actionInvocation.inputs;
-  const data = inputs && inputs[id];
-  const value = data && data.stringValues && data.stringValues[0];
-  if (value == null || String(value).trim() === '') throw new Error(id + ' が入力されていません。');
-  return String(value);
-}
-
-function studioOptionalInputString_(event, id) {
-  const inputs = event && event.workflow && event.workflow.actionInvocation && event.workflow.actionInvocation.inputs;
-  const data = inputs && inputs[id];
-  const value = data && data.stringValues && data.stringValues[0];
-  return value == null ? '' : String(value);
-}
-
-function studioStringValue_(value) {
-  return { stringValues: [String(value == null ? '' : value)] };
-}
-
-function studioOutputVariables_(variableDataMap) {
-  const workflowAction = AddOnsResponseService.newReturnOutputVariablesAction()
-    .setVariableDataMap(variableDataMap);
-  const hostAppAction = AddOnsResponseService.newHostAppAction()
-    .setWorkflowAction(workflowAction);
-  return AddOnsResponseService.newRenderActionBuilder()
-    .setHostAppAction(hostAppAction)
-    .build();
-}
-
-function studioPushCard_(card) {
-  return { action: { navigations: [{ push_card: card }] } };
-}
-
-function studioSaveButton_() {
-  return {
-    text: '保存',
-    onClick: { hostAppAction: { workflowAction: { saveWorkflowAction: {} } } }
   };
 }

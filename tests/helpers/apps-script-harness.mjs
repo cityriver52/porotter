@@ -101,6 +101,8 @@ export function createAppsScriptHarness(root, options = {}) {
   const spreadsheets = new Map();
   let spreadsheetSequence = 0;
   let uuidSequence = 0;
+  let triggerSequence = 0;
+  const triggers = [];
   let activeEmail = options.email || 'owner@example.com';
   const scriptProperties = {
     getProperty: key => propertyMap.get(key) || null,
@@ -141,6 +143,33 @@ export function createAppsScriptHarness(root, options = {}) {
       }
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+    ScriptApp: {
+      newTrigger: handlerFunction => {
+        const schedule = {};
+        const builder = {
+          timeBased() { return this; },
+          everyHours(value) { schedule.everyHours = value; return this; },
+          everyMinutes(value) { schedule.everyMinutes = value; return this; },
+          create() {
+            const trigger = {
+              id: `trigger-${++triggerSequence}`,
+              handlerFunction,
+              schedule: { ...schedule },
+              getHandlerFunction() { return this.handlerFunction; },
+              getUniqueId() { return this.id; }
+            };
+            triggers.push(trigger);
+            return trigger;
+          }
+        };
+        return builder;
+      },
+      getProjectTriggers: () => [...triggers],
+      deleteTrigger: trigger => {
+        const index = triggers.indexOf(trigger);
+        if (index >= 0) triggers.splice(index, 1);
+      }
+    },
     HtmlService: {
       createTemplateFromFile: () => ({ evaluate: () => ({ setTitle() { return this; }, addMetaTag() { return this; }, setXFrameOptionsMode() { return this; } }) }),
       createHtmlOutputFromFile: () => ({ getContent: () => '' })
@@ -152,11 +181,15 @@ export function createAppsScriptHarness(root, options = {}) {
     }
   });
 
-  for (const file of ['Config.gs', 'Repository.gs', 'Domain.gs', 'Api.gs', 'Code.gs', 'Studio.gs']) {
+  for (const file of ['Config.gs', 'Repository.gs', 'Domain.gs', 'Api.gs', 'Code.gs', 'Studio.gs', 'Automation.gs']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   }
   context.__definitions = vm.runInContext('CONFIG_.SHEETS', context);
   context.__setActiveEmail = value => { activeEmail = value; };
+  context.__getTriggers = () => triggers.map(trigger => ({
+    handlerFunction: trigger.handlerFunction,
+    schedule: { ...trigger.schedule }
+  }));
 
   return {
     context,
