@@ -16,17 +16,9 @@ for (const filename of fs.readdirSync(root).filter(name => name.endsWith('.gs'))
 
 try {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'appsscript.json'), 'utf8'));
-  const workflowElements = manifest.addOns?.flows?.workflowElements || [];
-  if (workflowElements.length !== 2) errors.push('appsscript.json: expected 2 Workspace Studio custom steps');
-  const prepareStep = workflowElements.find(element => element.id === 'pickPorotterPersona');
-  const publishStep = workflowElements.find(element => element.id === 'publishPorotterPost');
-  const prepareOutputs = prepareStep?.workflowAction?.outputs?.map(output => output.id) || [];
-  const publishInputs = publishStep?.workflowAction?.inputs?.map(input => input.id) || [];
-  if (!prepareOutputs.includes('actionContext') || !prepareOutputs.includes('generationPrompt')) {
-    errors.push('appsscript.json: Studio preparation outputs are incomplete');
-  }
-  if (!publishInputs.includes('actionContext') || !publishInputs.includes('generatedText')) {
-    errors.push('appsscript.json: Studio publish inputs are incomplete');
+  if (manifest.addOns) errors.push('appsscript.json: custom Workspace Studio steps must not be configured');
+  if (!manifest.oauthScopes?.includes('https://www.googleapis.com/auth/script.scriptapp')) {
+    errors.push('appsscript.json: trigger management scope is missing');
   }
 } catch (error) {
   errors.push(`appsscript.json: ${error.message}`);
@@ -70,6 +62,10 @@ if (!clientFile.includes('threadOpenable: true') || !clientFile.includes('timeli
 const studioFile = fs.readFileSync(path.join(root, 'Studio.gs'), 'utf8');
 for (const requiredContext of ['Google Drive', 'Gmail', 'Google Chat', 'フォローしていないスレッド', 'フォロー状態を確認できない返信']) {
   if (!studioFile.includes(requiredContext)) errors.push(`Studio.gs: Workspace context rule is missing: ${requiredContext}`);
+}
+const automationFile = fs.readFileSync(path.join(root, 'Automation.gs'), 'utf8');
+for (const requiredToken of ['AI_REQUEST_STATUS.REQUESTED', 'AI_REQUEST_STATUS.GENERATED', 'AI_REQUEST_STATUS.PUBLISHED', 'everyHours(6)', 'everyMinutes(10)']) {
+  if (!automationFile.includes(requiredToken)) errors.push(`Automation.gs: queue automation is incomplete: ${requiredToken}`);
 }
 
 if (errors.length) {

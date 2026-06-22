@@ -1,76 +1,116 @@
-# Workspace Studio 定時投稿・返信ガイド
+# Workspace Studio AI投稿・返信ガイド
 
-ぽろったーのAI投稿・返信は、外部APIやWebhookを使わず、Google Workspace Studio、Gemini、同じApps Scriptプロジェクトだけで動かします。
+ぽろったーのAI投稿・返信は、Workspace Studioのカスタムステップを使いません。GASの時間トリガー、`AIRequests`シート、Workspace Studioの標準ステップだけで動作します。外部API、Gemini APIキー、Webhookは不要です。
 
-定時実行ごとの動作は次の順で決まります。
+処理の分担は次のとおりです。
 
-1. AI投稿に対するユーザー返信のうち、まだAIが返答していないものがあれば、その返信への返答を最優先します。
-2. 未回答のユーザー返信がなければ、問い、違和感、未完了を示すタグ、時間経過、最近繰り返されたテーマなどを評価し、今返す価値がある投稿だけを返信候補にします。
-3. 返信候補があるときは、最大8件をGeminiが読み、疑似アカウントの視点で最も有意義に議論できる投稿を選びます。同じ投稿へのAI返信は繰り返さず、自発的なAI返信は20時間に1件までに制限します。
-4. 十分な返信候補がないときは無理に返信せず、新しい気づきの投稿を選びます。
+1. GASが疑似アカウントと投稿／返信対象を選び、`AIRequests`へ`REQUESTED`行を追加します。
+2. Workspace Studioがその行を検知し、`generationPrompt`をGeminiへ渡します。
+3. Studioが回答を`generatedText`へ保存し、状態を`GENERATED`にします。
+4. GASが最大10分後に回答を検証し、投稿または返信として保存して`PUBLISHED`にします。
+
+AIの返信対象は無作為には決めません。未回答のユーザー返信を最優先し、それ以外は問い、違和感、時間経過、最近繰り返されたテーマなどを評価します。同じ投稿への重複返信を防ぎ、自発的なAI返信は20時間に1件までに制限します。
 
 ## 前提
 
-- Workspace Studioを利用できるGoogle Workspaceアカウントであること（個人の `@gmail.com` アカウントでは利用できません）
-- Apps Scriptのテストアドオンをインストールするアカウントと、Studioでフローを作成・実行するアカウントが同じであること
-- 仕事用・学校用アカウントでは、管理者がGeminiを有効にしていること
-- Workspaceのスマート機能が有効であること
-- Workspace Studioのカスタムステップは限定プレビューのため、組織で利用できること
+- Workspace StudioとGeminiを利用できる職場または学校のGoogle Workspaceアカウント
+- Apps Script、保存先スプレッドシート、Studioのフローを同じアカウントで管理すること
+- 管理者がWorkspace Studio、Gemini、Googleスプレッドシートとの連携を許可していること
+- ぽろったーで`setupPorotter`を実行済みであること
+
+カスタムステップの限定プレビュー参加は不要です。「デプロイをテスト」からGoogle Workspaceアドオンをインストールする作業も不要です。
 
 公式資料：
 
-- [Google Workspace Studio の使用を開始する](https://support.google.com/workspace-studio/answer/16444479?hl=ja)
-- [フローで AI ステップを使用するためのヒント](https://support.google.com/workspace-studio/answer/16431105?hl=ja)
-- [カスタム ステップを作成してフロー内で使用する](https://support.google.com/workspace-studio/answer/16433731?hl=ja)
-- [Apps Scriptでカスタムステップを作成する](https://developers.google.com/workspace/add-ons/studio/quickstart-calculator?hl=ja)
+- [Google Workspace Studioの使用を開始する](https://support.google.com/workspace-studio/answer/16444479?hl=ja)
+- [Googleスプレッドシートの開始条件を設定する](https://support.google.com/workspace-studio/answer/16655443?hl=ja)
+- [Workspace Studioで使用できる開始条件とステップ](https://support.google.com/workspace-studio/answer/16765661?hl=ja)
+- [Apps Scriptのインストール型トリガー](https://developers.google.com/apps-script/guides/triggers/installable?hl=ja)
 
-## 1. 疑似アカウントを作る
+## 1. GASと疑似アカウントを準備する
 
-ぽろったーの「設定」→「疑似アカウント」で1件以上作成し、「定時投稿の候補に含める」をオンにします。テンプレートから始めて、担当業務に合わせて役割とパーソナリティを具体化します。
+1. Apps Scriptエディタで`setupPorotter`を実行します。
+2. 実行結果の`spreadsheetUrl`を開き、`AIRequests`シートがあることを確認します。
+3. ぽろったーの「設定」→「疑似アカウント」で1件以上作成します。
+4. 使用する疑似アカウントの「定時投稿の候補に含める」をオンにします。
 
-## 2. カスタムステップをテスト用にインストールする
+この時点では`installPorotterAiAutomation`をまだ実行しないでください。先にStudioのフローを作ることで、最初のリクエストを取りこぼしません。
 
-1. Apps Scriptエディタでporotterプロジェクトを開きます。
-2. 「デプロイ」→「デプロイをテスト」を開きます。
-3. Google Workspaceアドオンをインストールします。
-4. Workspace Studioを再読み込みします。
+## 2. Workspace Studioのフローを作る
 
-Studioが製品紹介ページへ転送される場合は、Studioを利用できる職場または学校のGoogle Workspaceアカウントへ切り替えてから、同じアカウントで手順1からやり直します。
+[Workspace Studio](https://studio.workspace.google.com/)で新しいフローを作り、次の3要素を順に設定します。画面上の名称は組織の言語設定により多少異なる場合があります。
 
-インストール後、ぽろったーの次の2ステップがStudioに表示されます。
+### 開始条件：スプレッドシートの行が変更されたとき
 
-- 「ぽろったーの投稿・返信を準備する」
-- 「ぽろったーへ投稿・返信する」
+- スプレッドシート：`porotter Data`
+- シート：`AIRequests`
+- 行の条件：`status` が `REQUESTED` と等しい
+- 監視する列：`status`
 
-以前の定時投稿フローを作成済みの場合は、Apps Scriptを更新してテスト用アドオンを再インストールした後、Studio上の古い2つのカスタムステップをいったん削除し、新しい同名ステップを追加し直してください。これにより、新しい出力変数「保存用の動作コンテキスト」が表示されます。
+開始条件から後続ステップへ渡す行データに、少なくとも`id`と`generationPrompt`が含まれることをテスト画面で確認します。
 
-## 3. 定時フローを作る
+### ステップ1：Geminiに相談
 
-1. [Workspace Studio](https://studio.workspace.google.com/)で新しいフローを作成します。
-2. 開始条件に「スケジュールで実行」を選び、曜日・時刻・タイムゾーンを設定します。
-3. 「ぽろったーの投稿・返信を準備する」ステップを追加します。
-4. 「Geminiに相談」ステップを追加します。
-5. Geminiのプロンプトに、前ステップの出力変数「Gemini用プロンプト」を指定します。
-6. Geminiのソースで「Workspace」を有効にします。これにより、アクセス権のあるDrive、Gmail、Google Chatの情報を参照できます。
-7. 「ぽろったーへ投稿・返信する」ステップを追加します。
-8. 「疑似アカウントID」に手順3の「疑似アカウントID」を指定します。
-9. 「動作コンテキスト」に手順3の「保存用の動作コンテキスト」を指定します。
-10. 「Geminiの回答」に手順4の回答を指定します。
+- プロンプト：開始条件の行データにある`generationPrompt`
+- データソース：Workspace
+- 回答形式：テキスト
 
-Gemini用プロンプトは動作ごとに自動生成されます。新規投稿では過去7日程度に更新されたDriveファイル、最近受信したメール、最近届いたChatメッセージから業務のヒントを探します。返信では、偶然の確率ではなく未完了度や反復テーマから候補を選び、対象の投稿やユーザー返信に関連する最近のWorkspace情報も参照して、単なる称賛や要約で終わらない240文字以内の返答を作ります。
+プロンプトには疑似アカウントの役割、今回の投稿／返信候補、参照条件、JSON出力形式がすでに含まれています。固定文を付け足す必要はありません。
 
-Chatの参照条件は保守的に制限しています。新規投稿（スレッドの先頭）は対象にできますが、スレッド内の返信は、フロー実行者がそのスレッドを明示的にフォローしているとGeminiが確認できた場合だけを対象にします。フォローしていないスレッド、フォロー状態を確認できないスレッドの返信、既読・未読だけを根拠に選んだ返信は無視します。
+### ステップ2：スプレッドシートの行を更新
 
-## 4. テストして有効化する
+- スプレッドシート：`porotter Data`
+- シート：`AIRequests`
+- 更新対象：`id` が開始条件の行の`id`と等しい行
+- `generatedText`：前の「Geminiに相談」ステップの回答
+- `status`：固定値`GENERATED`
 
-Studioの「テスト実行」は実際にぽろったーへ投稿または返信します。最初のステップの出力「今回の動作」と「返信対象の概要」で選択結果を確認できます。内容に問題がなければフローをオンにします。生成結果がJSONでない場合も本文として受け入れますが、280文字を超える部分は自動的に省略されます。
+他の列は更新しません。特に`personaId`、`actionContext`、`generationPrompt`はGASが公開時に再利用するため残します。
+
+設定後、フローをオンにします。`GENERATED`への更新でも開始条件自体は確認されますが、`status = REQUESTED`の条件に一致しないためGeminiは再実行されません。
+
+## 3. GASの時間トリガーを有効にする
+
+Studioのフローをオンにした後、Apps Scriptエディタで`installPorotterAiAutomation`を1回実行します。初回はトリガー管理権限の確認が表示されます。
+
+この関数は、ぽろったー用の既存トリガーだけを入れ直し、次を設定します。
+
+- 6時間ごと：`preparePorotterAiRequest`
+- 10分ごと：`processPorotterAiResponses`
+
+同時に最初の`REQUESTED`行を1件作ります。再実行しても同じトリガーが重複することはありません。他の関数に設定されたトリガーは削除しません。
+
+## 4. 動作を確認する
+
+1. `AIRequests`で最新行の`status`が`REQUESTED`になったことを確認します。
+2. Studioの実行履歴を開き、Geminiと行更新が成功したことを確認します。
+3. `AIRequests`の同じ行が`GENERATED`になり、`generatedText`に回答が入ったことを確認します。
+4. 待たずに確認する場合は、Apps Scriptで`processPorotterAiResponses`を手動実行します。
+5. 行が`PUBLISHED`になり、ぽろったーのタイムラインまたは返信スレッドに反映されたことを確認します。
+
+`checkPorotterAiAutomation`を実行すると、トリガーの有無、状態別の件数、保存先URLを本文を含めずに確認できます。
+
+## 状態とトラブルシューティング
+
+| status | 意味 | 対応 |
+|---|---|---|
+| `CREATING` | GASが行を準備中 | 通常はすぐ`REQUESTED`になります |
+| `REQUESTED` | Studioの処理待ち | Studioのフローと実行履歴を確認します |
+| `GENERATED` | Gemini回答の公開待ち | `processPorotterAiResponses`を実行できます |
+| `PUBLISHED` | 投稿または返信として保存済み | 対応不要です |
+| `ERROR` | 生成または公開に失敗 | `errorMessage`を確認します |
+
+`REQUESTED`のまま変わらない場合は、フローがオンか、対象シートが`AIRequests`か、条件値が大文字の`REQUESTED`かを確認します。フローを作る前に行を作ってしまった場合は、その行の`status`を一度`CREATING`へ変更してから`REQUESTED`へ戻すと再検知できます。
+
+48時間処理されない`REQUESTED`行は、次回のGAS実行時に`ERROR`へ移されます。その後`preparePorotterAiRequest`を手動実行すれば新しいリクエストを作成できます。
+
+自動化を止める場合は`uninstallPorotterAiAutomation`を実行します。これは時間トリガーだけを削除し、投稿、返信、疑似アカウント、過去のリクエストは削除しません。
 
 ## 運用上の注意
 
-- Geminiが参照できる範囲は、フローを実行するユーザーがアクセス可能なWorkspaceデータです。
-- Gmailは受信メールだけを対象とし、送信済みメールと下書きは対象外です。Chatのスレッド返信はフォロー状態を確認できる場合だけを対象にします。
-- 新規投稿には個人名・顧客名・金額・本文の直接引用を含めない指示を入れていますが、初期運用では投稿・返信の結果を定期的に確認してください。
-- 疑似アカウントを無効にすると、新しい定時投稿の候補から外れます。過去の投稿は残ります。
-- 自発的なAI返信は直近45日以内のユーザー投稿だけを対象にし、AI投稿やすでにAIが返信した投稿には重ねて返信しません。
-- 同じユーザー返信にAI返信が重複しないよう、保存時にも再確認します。並行実行で先に別フローが返信した場合、後から保存するフローはエラーで終了します。
+- Geminiが参照できる範囲は、フロー実行者がアクセス可能なWorkspaceデータです。
+- Gmailは受信メールだけ、Chatのスレッド返信はフォロー状態を確認できる場合だけを使うようプロンプトで制限しています。
+- 個人名、顧客名、金額、本文の直接引用を避ける指示を入れていますが、初期運用では結果を定期的に確認してください。
+- `AIRequests`には生成用プロンプトとGeminiの回答が残ります。保存先スプレッドシートを他者と共有しないでください。
+- Apps Scriptのインストール型トリガーは、トリガーを作成したアカウントの権限で実行されます。
 - 外部サービスへの送信、外部API呼び出し、Webhookは行いません。
