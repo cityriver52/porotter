@@ -204,6 +204,38 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.equal(app.apiListPersonas().data.length, 0);
 });
 
+test('REQUESTED queue rows do not block later AI request creation', () => {
+  const app = createContext();
+  app.setupPorotter();
+  assert.equal(typeof app.preparePorterAiRequest, 'function');
+  assert.equal(typeof app.processPorterAiResponses, 'function');
+  const persona = app.apiSavePersona('', {
+    name: '待機をほどく人',
+    role: '流れを止めない',
+    prompt: '詰まりを作らず、短く気づきを返す。',
+    enabled: true
+  }).data;
+  app.apiSaveSettings({
+    displayName: 'owner',
+    theme: 'system',
+    pageSize: 20,
+    aiPostIntervalHours: 1,
+    aiReplyIntervalHours: 0
+  });
+
+  const first = app.apiRequestAiPost(persona.id).data;
+  const firstRow = app.findRecordById_(app.__definitions.AI_REQUESTS, first.requestId);
+  const timestamp = new Date(Date.now() - (2 * 60 * 60 * 1000)).toISOString();
+  app.patchRecord_(app.__definitions.AI_REQUESTS, firstRow._row, {
+    status: 'REQUESTED',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  });
+
+  const second = app.preparePorotterAiRequest();
+  assert.equal(second.created, true);
+});
+
 test('designed serendipity chooses unfinished thoughts instead of replying by chance', () => {
   const app = createContext();
   app.setupPorotter();

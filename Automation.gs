@@ -46,6 +46,10 @@ function preparePorotterAiRequest() {
   });
 }
 
+function preparePorterAiRequest() {
+  return preparePorotterAiRequest();
+}
+
 function createPorotterAiRequest_(email, options) {
     const requestOptions = options || {};
     const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
@@ -117,7 +121,7 @@ function createPorotterAiRequest_(email, options) {
 
 function pendingAiRequestCount_(requests) {
   return (requests || []).filter(function (request) {
-    return [CONFIG_.AI_REQUEST_STATUS.CREATING, CONFIG_.AI_REQUEST_STATUS.REQUESTED,
+    return [CONFIG_.AI_REQUEST_STATUS.CREATING,
       CONFIG_.AI_REQUEST_STATUS.GENERATED].indexOf(String(request.status)) >= 0;
   }).length;
 }
@@ -188,6 +192,10 @@ function processPorotterAiResponses() {
   });
 }
 
+function processPorterAiResponses() {
+  return processPorotterAiResponses();
+}
+
 function installPorotterAiAutomation() {
   const email = automationOwnerEmail_();
   ensureSchema_(getSpreadsheet_());
@@ -225,6 +233,8 @@ function checkPorotterAiAutomation() {
 function buildAiAutomationStatus_(email) {
   ensureSchema_(getSpreadsheet_());
   const handlers = porotterAiTriggerHandlers_();
+  const legacyHandlers = legacyPorotterAiTriggerHandlers_();
+  const managedHandlers = managedPorotterAiTriggerHandlers_();
   const installedHandlers = ScriptApp.getProjectTriggers().map(function (trigger) {
     return trigger.getHandlerFunction();
   });
@@ -235,10 +245,16 @@ function buildAiAutomationStatus_(email) {
       result[status] = (result[status] || 0) + 1;
       return result;
     }, {});
+  const currentInstalled = handlers.every(function (handler) {
+    return installedHandlers.indexOf(handler) >= 0;
+  });
+  const legacyInstalled = legacyHandlers.every(function (handler) {
+    return installedHandlers.indexOf(handler) >= 0;
+  });
   return {
-    installed: handlers.every(function (handler) { return installedHandlers.indexOf(handler) >= 0; }),
+    installed: currentInstalled || legacyInstalled,
     ownerEmail: email,
-    triggerHandlers: installedHandlers.filter(function (handler) { return handlers.indexOf(handler) >= 0; }),
+    triggerHandlers: installedHandlers.filter(function (handler) { return managedHandlers.indexOf(handler) >= 0; }),
     requestCounts: counts,
     recentRequests: requests.sort(compareCreatedDescending_).slice(0, 10).map(function (request) {
       return {
@@ -292,8 +308,16 @@ function porotterAiTriggerHandlers_() {
   return ['preparePorotterAiRequest', 'processPorotterAiResponses'];
 }
 
+function legacyPorotterAiTriggerHandlers_() {
+  return ['preparePorterAiRequest', 'processPorterAiResponses'];
+}
+
+function managedPorotterAiTriggerHandlers_() {
+  return porotterAiTriggerHandlers_().concat(legacyPorotterAiTriggerHandlers_());
+}
+
 function removePorotterAiTriggers_() {
-  const handlers = porotterAiTriggerHandlers_();
+  const handlers = managedPorotterAiTriggerHandlers_();
   let deletedCount = 0;
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     if (handlers.indexOf(trigger.getHandlerFunction()) >= 0) {
