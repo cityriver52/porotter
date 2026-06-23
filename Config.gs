@@ -24,7 +24,8 @@ const CONFIG_ = Object.freeze({
   AI_REQUEST_PROCESS_LIMIT: 5,
   DEFAULT_AI_POST_INTERVAL_HOURS: 6,
   DEFAULT_AI_REPLY_INTERVAL_HOURS: 20,
-  AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
+  AI_INTERVAL_MINUTES: Object.freeze([0, 10, 20, 30, 40, 50, 60, 120, 180, 360, 720, 1200, 1440, 2880, 4320, 10080]),
+  AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 20 / 60, 30 / 60, 40 / 60, 50 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
   PERSONA_AVATAR_COLORS: Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']),
   AI_REQUEST_STATUS: Object.freeze({
     CREATING: 'CREATING',
@@ -191,14 +192,29 @@ function clampInteger_(value, fallback, minimum, maximum) {
 }
 
 function normalizeAiIntervalHours_(value, fallback) {
+  const minutes = aiIntervalHoursToMinutes_(value);
+  if (CONFIG_.AI_INTERVAL_MINUTES.indexOf(minutes) >= 0) {
+    return aiIntervalMinutesToHours_(minutes);
+  }
+  const fallbackMinutes = aiIntervalHoursToMinutes_(fallback);
+  if (CONFIG_.AI_INTERVAL_MINUTES.indexOf(fallbackMinutes) >= 0) {
+    return aiIntervalMinutesToHours_(fallbackMinutes);
+  }
+  return 0;
+}
+
+function aiIntervalHoursToMinutes_(value) {
   const parsed = Number(value);
-  return CONFIG_.AI_INTERVAL_HOURS.indexOf(parsed) >= 0 ? parsed : fallback;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round(parsed * 60);
+}
+
+function aiIntervalMinutesToHours_(minutes) {
+  return Number(minutes) / 60;
 }
 
 function aiIntervalHoursToMs_(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.round(parsed * 60 * 60 * 1000);
+  return aiIntervalHoursToMinutes_(value) * 60 * 1000;
 }
 
 function isValidDateInput_(value) {

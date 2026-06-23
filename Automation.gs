@@ -29,11 +29,23 @@ function preparePorotterAiRequest() {
       CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS
     );
     let activity = null;
+    let requestActionType = '';
     if (aiRequestDue_(requests, '返信', replyInterval)) {
       activity = chooseStudioActivity_(email, persona, { only: 'reply' });
+      if (activity) {
+        requestActionType = '返信';
+      } else {
+        activity = chooseStudioActivity_(email, persona, { only: 'post' });
+        if (activity) {
+          requestActionType = '返信';
+          activity.targetSummary = activity.targetSummary || '返信対象がないため新規投稿';
+          activity.context = Object.assign({}, activity.context || {}, { fallbackFrom: 'reply' });
+        }
+      }
     }
     if (!activity && aiRequestDue_(requests, '新規投稿', postInterval)) {
       activity = chooseStudioActivity_(email, persona, { only: 'post' });
+      if (activity) requestActionType = '新規投稿';
     }
     if (!activity) {
       return {
@@ -42,7 +54,11 @@ function preparePorotterAiRequest() {
         pendingCount: pendingAiRequestCount_(requests)
       };
     }
-    return createPorotterAiRequest_(email, { persona: persona, activity: activity });
+    return createPorotterAiRequest_(email, {
+      persona: persona,
+      activity: activity,
+      actionType: requestActionType
+    });
   });
 }
 
@@ -85,7 +101,7 @@ function createPorotterAiRequest_(email, options) {
       status: CONFIG_.AI_REQUEST_STATUS.CREATING,
       personaId: persona.id,
       personaName: persona.name,
-      actionType: activity.type === 'post' ? '新規投稿' : '返信',
+      actionType: String(requestOptions.actionType || (activity.type === 'post' ? '新規投稿' : '返信')),
       targetSummary: activity.targetSummary || '新しい気づきを投稿',
       actionContext: JSON.stringify(activity.context),
       generationPrompt: buildPersonaGenerationPrompt_(email, persona, activity),
@@ -127,13 +143,14 @@ function pendingAiRequestCount_(requests) {
 }
 
 function aiRequestDue_(requests, actionType, intervalHours) {
-  if (!intervalHours) return false;
+  const intervalMs = aiIntervalHoursToMs_(intervalHours);
+  if (!intervalMs) return false;
   const latest = (requests || [])
     .filter(function (request) { return String(request.actionType) === actionType; })
     .map(function (request) { return new Date(request.createdAt).getTime(); })
     .filter(Number.isFinite)
     .sort(function (a, b) { return b - a; })[0];
-  return !latest || Date.now() - latest >= intervalHours * 60 * 60 * 1000;
+  return !latest || Date.now() - latest >= intervalMs;
 }
 
 function processPorotterAiResponses() {
@@ -203,7 +220,7 @@ function installPorotterAiAutomation() {
 
   ScriptApp.newTrigger('preparePorotterAiRequest')
     .timeBased()
-    .everyHours(1)
+    .everyMinutes(10)
     .create();
   ScriptApp.newTrigger('processPorotterAiResponses')
     .timeBased()
