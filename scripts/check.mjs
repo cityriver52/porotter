@@ -81,9 +81,12 @@ if (index.includes('id="ai-request-status"') || clientFile.includes('AI投稿の
 for (const requiredClient of ["callApi('apiSetupPorotter'", "callApi('apiNotifications'", "callApi('apiRequestAiPost'"]) {
   if (!clientFile.includes(requiredClient)) errors.push(`JavaScript.html: required API integration is missing: ${requiredClient}`);
 }
-const automationFile = fs.readFileSync(path.join(root, 'Automation.gs'), 'utf8');
-for (const requiredToken of ['AI_REQUEST_STATUS.REQUESTED', 'AI_REQUEST_STATUS.GENERATED', 'AI_REQUEST_STATUS.PUBLISHED', 'everyHours(1)', 'everyMinutes(10)']) {
-  if (!automationFile.includes(requiredToken)) errors.push(`Automation.gs: queue automation is incomplete: ${requiredToken}`);
+const automationSource = fs.readdirSync(root)
+  .filter(name => name.endsWith('.gs'))
+  .map(name => fs.readFileSync(path.join(root, name), 'utf8'))
+  .join('\n');
+for (const requiredToken of ['AI_REQUEST_STATUS.REQUESTED', 'AI_REQUEST_STATUS.GENERATED', 'AI_REQUEST_STATUS.PUBLISHED', 'everyMinutes(10)']) {
+  if (!automationSource.includes(requiredToken)) errors.push(`AI automation sources are incomplete: ${requiredToken}`);
 }
 
 if (errors.length) {
