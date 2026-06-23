@@ -236,6 +236,31 @@ test('REQUESTED queue rows do not block later AI request creation', () => {
   assert.equal(second.created, true);
 });
 
+test('persona history is injected into AI post prompts to reduce repetition', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '観察する人',
+    role: '同じことを繰り返さない',
+    prompt: '過去の投稿を踏まえつつ、別の角度から短く気づきを書く。',
+    enabled: true
+  }).data;
+  app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
+    body: '会議の前に、資料より先に論点を並べ替えると見え方が変わる。',
+    tags: ['会議']
+  }));
+  app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
+    body: '同じ課題でも、締切直前と翌朝では気づきの粒度が違う。',
+    tags: ['気づき']
+  }));
+
+  const prompt = app.buildPersonaGenerationPrompt_('owner@example.com', persona, { type: 'post' });
+  assert.match(prompt, /直近の同じ疑似アカウントの投稿/);
+  assert.match(prompt, /会議の前に、資料より先に論点を並べ替えると見え方が変わる/);
+  assert.match(prompt, /同じ課題でも、締切直前と翌朝では気づきの粒度が違う/);
+  assert.match(prompt, /同じ論点、同じ言い回し、同じ結論は避けてください/);
+});
+
 test('designed serendipity chooses unfinished thoughts instead of replying by chance', () => {
   const app = createContext();
   app.setupPorotter();

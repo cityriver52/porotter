@@ -88,7 +88,7 @@ function createPorotterAiRequest_(email, options) {
       actionType: activity.type === 'post' ? '新規投稿' : '返信',
       targetSummary: activity.targetSummary || '新しい気づきを投稿',
       actionContext: JSON.stringify(activity.context),
-      generationPrompt: buildPersonaGenerationPrompt_(persona, activity),
+      generationPrompt: buildPersonaGenerationPrompt_(email, persona, activity),
       generatedText: '',
       resultType: '',
       resultPostId: '',
