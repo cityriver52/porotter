@@ -73,7 +73,7 @@ Studioのフローをオンにした後、ぽろったーの「設定」→「AI
 
 この操作は、ぽろったー用の既存トリガーだけを入れ直し、次を設定します。
 
-- 1時間ごと：`preparePorotterAiRequest`（設定した投稿・返信頻度に達した場合だけリクエストを作成）
+- 1時間ごと：`preparePorotterAiRequest`（設定した投稿・返信頻度に達した場合だけリクエストを作成。`REQUESTED` が残っていても止まりません）
 - 10分ごと：`processPorotterAiResponses`
 
 投稿頻度と返信頻度は、同じ設定画面で個別に変更できます。再実行しても同じトリガーが重複することはありません。他の関数に設定されたトリガーは削除しません。
@@ -93,7 +93,7 @@ Studioのフローをオンにした後、ぽろったーの「設定」→「AI
 | status | 意味 | 対応 |
 |---|---|---|
 | `CREATING` | GASが行を準備中 | 通常はすぐ`REQUESTED`になります |
-| `REQUESTED` | Studioの処理待ち | Studioのフローと実行履歴を確認します |
+| `REQUESTED` | Studioの処理待ち | Studioのフローと実行履歴を確認します。次のGAS実行は止めません |
 | `GENERATED` | Gemini回答の公開待ち | `processPorotterAiResponses`を実行できます |
 | `PUBLISHED` | 投稿または返信として保存済み | 対応不要です |
 | `ERROR` | 生成または公開に失敗 | `errorMessage`を確認します |

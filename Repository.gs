@@ -78,11 +78,14 @@ function recordFromRow_(headers, row, rowNumber) {
 }
 
 function appendRecord_(definition, record) {
-  const sheet = getSheet_(definition.name);
+  const spreadsheet = getSpreadsheet_();
+  ensureSchema_(spreadsheet);
+  const sheet = spreadsheet.getSheetByName(definition.name);
   const row = definition.headers.map(function (header) {
     return record[header] == null ? '' : record[header];
   });
-  sheet.appendRow(row);
+  const nextRow = sheet.getLastRow() + 1;
+  sheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
   return record;
 }
 
