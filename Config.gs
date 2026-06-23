@@ -217,6 +217,12 @@ function aiIntervalHoursToMs_(value) {
   return aiIntervalHoursToMinutes_(value) * 60 * 1000;
 }
 
+function aiIntervalHoursToMs_(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round(parsed * 60 * 60 * 1000);
+}
+
 function isValidDateInput_(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
 }
