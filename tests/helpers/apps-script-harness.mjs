@@ -181,7 +181,7 @@ export function createAppsScriptHarness(root, options = {}) {
     }
   });
 
-  for (const file of ['Config.gs', 'Repository.gs', 'Domain.gs', 'Api.gs', 'Code.gs', 'Studio.gs', 'Automation.gs', 'ZZ_AutomationOverrides.gs']) {
+  for (const file of ['Config.gs', 'Repository.gs', 'Domain.gs', 'Api.gs', 'Code.gs', 'Studio.gs', 'Automation.gs']) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   }
   context.__definitions = vm.runInContext('CONFIG_.SHEETS', context);

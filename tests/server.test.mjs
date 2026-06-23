@@ -375,10 +375,20 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   }).data;
   assert.equal(settings.aiPostIntervalHours, 1);
   assert.equal(settings.aiReplyIntervalHours, 0);
+  const minuteSettings = app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiPostIntervalHours: 20 / 60, aiReplyIntervalHours: 50 / 60
+  }).data;
+  assert.equal(minuteSettings.aiPostIntervalHours, 20 / 60);
+  assert.equal(minuteSettings.aiReplyIntervalHours, 50 / 60);
+  app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiPostIntervalHours: 1, aiReplyIntervalHours: 0
+  });
 
   const scheduled = app.preparePorotterAiRequest();
   assert.equal(scheduled.created, true);
-  assert.equal(scheduled.actionType, '譁ｰ隕乗兜遞ｿ');
+  assert.equal(scheduled.actionType, '新規投稿');
   const row = app.findRecordById_(app.__definitions.AI_REQUESTS, scheduled.requestId);
   app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, { status: 'ERROR' });
   assert.equal(app.preparePorotterAiRequest().created, false);
@@ -389,7 +399,7 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   });
   const manual = app.apiRequestAiPost(persona.id).data;
   assert.equal(manual.created, true);
-  assert.equal(manual.actionType, '譁ｰ隕乗兜遞ｿ');
+  assert.equal(manual.actionType, '新規投稿');
 
   const replyApp = createContext();
   replyApp.setupPorotter();
@@ -405,13 +415,13 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
     aiPostIntervalHours: 0, aiReplyIntervalHours: 2
   });
   const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
-  assert.equal(forcedPost.actionType, '譁ｰ隕乗兜遞ｿ');
+  assert.equal(forcedPost.actionType, '新規投稿');
   const forcedPostRow = replyApp.findRecordById_(replyApp.__definitions.AI_REQUESTS, forcedPost.requestId);
   assert.equal(JSON.parse(forcedPostRow.actionContext).type, 'post');
   replyApp.patchRecord_(replyApp.__definitions.AI_REQUESTS, forcedPostRow._row, { status: 'ERROR' });
   const scheduledReply = replyApp.preparePorotterAiRequest();
   assert.equal(scheduledReply.created, true);
-  assert.equal(scheduledReply.actionType, '霑比ｿ｡');
+  assert.equal(scheduledReply.actionType, '返信');
 
   const fallbackApp = createContext();
   fallbackApp.setupPorotter();
@@ -430,9 +440,9 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   });
   const fallbackRequest = fallbackApp.preparePorotterAiRequest();
   assert.equal(fallbackRequest.created, true);
-  assert.equal(fallbackRequest.actionType, '霑比ｿ｡');
+  assert.equal(fallbackRequest.actionType, '返信');
   const fallbackRow = fallbackApp.findRecordById_(fallbackApp.__definitions.AI_REQUESTS, fallbackRequest.requestId);
-  assert.equal(fallbackRow.actionType, '霑比ｿ｡');
+  assert.equal(fallbackRow.actionType, '返信');
   assert.equal(JSON.parse(fallbackRow.actionContext).type, 'post');
 });
 
