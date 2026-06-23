@@ -24,7 +24,7 @@ const CONFIG_ = Object.freeze({
   AI_REQUEST_PROCESS_LIMIT: 5,
   DEFAULT_AI_POST_INTERVAL_HOURS: 6,
   DEFAULT_AI_REPLY_INTERVAL_HOURS: 20,
-  AI_INTERVAL_HOURS: Object.freeze([0, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
+  AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
   PERSONA_AVATAR_COLORS: Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']),
   AI_REQUEST_STATUS: Object.freeze({
     CREATING: 'CREATING',
@@ -193,6 +193,12 @@ function clampInteger_(value, fallback, minimum, maximum) {
 function normalizeAiIntervalHours_(value, fallback) {
   const parsed = Number(value);
   return CONFIG_.AI_INTERVAL_HOURS.indexOf(parsed) >= 0 ? parsed : fallback;
+}
+
+function aiIntervalHoursToMs_(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round(parsed * 60 * 60 * 1000);
 }
 
 function isValidDateInput_(value) {

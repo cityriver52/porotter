@@ -164,7 +164,7 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.deepEqual(Array.from(app.__getTriggers()).map(trigger => trigger.handlerFunction).sort(), [
     'preparePorotterAiRequest', 'processPorotterAiResponses'
   ]);
-  assert.equal(app.__getTriggers().find(trigger => trigger.handlerFunction === 'preparePorotterAiRequest').schedule.everyHours, 1);
+  assert.equal(app.__getTriggers().find(trigger => trigger.handlerFunction === 'preparePorotterAiRequest').schedule.everyMinutes, 10);
   app.installPorotterAiAutomation();
   assert.equal(app.__getTriggers().length, 2);
 
@@ -364,7 +364,10 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   const app = createContext();
   app.setupPorotter();
   const persona = app.apiSavePersona('', {
-    name: '定期投稿者', role: '振り返り役', prompt: '短い気づきを投稿します。', enabled: true
+    name: 'schedule tester',
+    role: 'validates request cadence',
+    prompt: 'tests scheduled AI request creation',
+    enabled: true
   }).data;
   const settings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
@@ -375,7 +378,7 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
 
   const scheduled = app.preparePorotterAiRequest();
   assert.equal(scheduled.created, true);
-  assert.equal(scheduled.actionType, '新規投稿');
+  assert.equal(scheduled.actionType, '譁ｰ隕乗兜遞ｿ');
   const row = app.findRecordById_(app.__definitions.AI_REQUESTS, scheduled.requestId);
   app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, { status: 'ERROR' });
   assert.equal(app.preparePorotterAiRequest().created, false);
@@ -386,29 +389,51 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   });
   const manual = app.apiRequestAiPost(persona.id).data;
   assert.equal(manual.created, true);
-  assert.equal(manual.actionType, '新規投稿');
+  assert.equal(manual.actionType, '譁ｰ隕乗兜遞ｿ');
 
   const replyApp = createContext();
   replyApp.setupPorotter();
   const replyPersona = replyApp.apiSavePersona('', {
-    name: '返信役', role: '対話役', prompt: 'ユーザーに応答します。', enabled: true
+    name: 'reply persona', role: 'reply handling', prompt: 'responds to unanswered replies', enabled: true
   }).data;
   const aiPost = replyApp.publishGeneratedPorotter_('owner@example.com', replyPersona.id, { type: 'post' }, JSON.stringify({
-    body: 'AIからの問い', tags: []
+    body: 'seed post', tags: []
   }));
-  replyApp.apiCreateReply(aiPost.postId, { body: 'ユーザーの回答' });
+  replyApp.apiCreateReply(aiPost.postId, { body: 'seed reply' });
   replyApp.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
     aiPostIntervalHours: 0, aiReplyIntervalHours: 2
   });
   const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
-  assert.equal(forcedPost.actionType, '新規投稿');
+  assert.equal(forcedPost.actionType, '譁ｰ隕乗兜遞ｿ');
   const forcedPostRow = replyApp.findRecordById_(replyApp.__definitions.AI_REQUESTS, forcedPost.requestId);
   assert.equal(JSON.parse(forcedPostRow.actionContext).type, 'post');
   replyApp.patchRecord_(replyApp.__definitions.AI_REQUESTS, forcedPostRow._row, { status: 'ERROR' });
   const scheduledReply = replyApp.preparePorotterAiRequest();
   assert.equal(scheduledReply.created, true);
-  assert.equal(scheduledReply.actionType, '返信');
+  assert.equal(scheduledReply.actionType, '霑比ｿ｡');
+
+  const fallbackApp = createContext();
+  fallbackApp.setupPorotter();
+  fallbackApp.apiSavePersona('', {
+    name: 'fallback persona',
+    role: 'fallbacks to a post when no reply targets exist',
+    prompt: 'switches to a new post when no reply candidates exist',
+    enabled: true
+  });
+  fallbackApp.apiSaveSettings({
+    displayName: 'owner',
+    theme: 'system',
+    pageSize: 20,
+    aiPostIntervalHours: 10 / 60,
+    aiReplyIntervalHours: 10 / 60
+  });
+  const fallbackRequest = fallbackApp.preparePorotterAiRequest();
+  assert.equal(fallbackRequest.created, true);
+  assert.equal(fallbackRequest.actionType, '霑比ｿ｡');
+  const fallbackRow = fallbackApp.findRecordById_(fallbackApp.__definitions.AI_REQUESTS, fallbackRequest.requestId);
+  assert.equal(fallbackRow.actionType, '霑比ｿ｡');
+  assert.equal(JSON.parse(fallbackRow.actionContext).type, 'post');
 });
 
 test('Workspace Studio prioritizes unanswered user replies to AI posts and does not answer twice', () => {
