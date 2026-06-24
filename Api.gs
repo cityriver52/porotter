@@ -112,9 +112,10 @@ function apiToggleFavorite(postId) {
 }
 
 function apiThread(postId) {
-  return runApi_(function (email) {
+  return runLockedApi_(function (email) {
     const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
     assertNotDeleted_(post);
+    markNotificationPostRead_(post.id);
     const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
       .filter(function (reply) {
         return String(reply.postId) === String(postId) && !reply.deletedAt;
@@ -508,6 +509,7 @@ function buildNotifications_(email, snapshot) {
   }, {});
   const settings = source.settings || readSettings_();
   const readAt = String(settings.notificationsReadAt || '');
+  const readByPost = parseNotificationPostReadAt_(settings.notificationsReadByPost);
   const items = replies
     .filter(function (reply) {
       if (String(reply.authorType || 'user') !== 'persona') return false;
@@ -529,7 +531,7 @@ function buildNotifications_(email, snapshot) {
         body: String(reply.body || ''),
         postBody: String(post && post.body || ''),
         createdAt: String(reply.createdAt || ''),
-        unread: !readAt || String(reply.createdAt || '') > readAt
+        unread: isNotificationUnread_(reply, readAt, readByPost)
       };
     });
   return {
@@ -537,6 +539,54 @@ function buildNotifications_(email, snapshot) {
     unreadCount: items.filter(function (item) { return item.unread; }).length,
     readAt: readAt
   };
+}
+
+function markNotificationPostRead_(postId) {
+  const normalizedPostId = String(postId || '');
+  if (!normalizedPostId) return;
+  const settings = readSettings_();
+  const readByPost = parseNotificationPostReadAt_(settings.notificationsReadByPost);
+  readByPost[normalizedPostId] = nowIso_();
+  writeSettings_({ notificationsReadByPost: JSON.stringify(compactNotificationPostReadAt_(readByPost)) });
+}
+
+function parseNotificationPostReadAt_(value) {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(String(value));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return Object.keys(parsed).reduce(function (result, postId) {
+      const readAt = String(parsed[postId] || '');
+      if (readAt) result[String(postId)] = readAt;
+      return result;
+    }, {});
+  } catch (error) {
+    return {};
+  }
+}
+
+function compactNotificationPostReadAt_(readByPost) {
+  return Object.keys(readByPost || {})
+    .map(function (postId) {
+      return { postId: String(postId), readAt: String(readByPost[postId] || '') };
+    })
+    .filter(function (item) { return item.postId && item.readAt; })
+    .sort(function (a, b) { return String(b.readAt).localeCompare(String(a.readAt)); })
+    .slice(0, 200)
+    .reduce(function (result, item) {
+      result[item.postId] = item.readAt;
+      return result;
+    }, {});
+}
+
+function isNotificationUnread_(reply, globalReadAt, readByPost) {
+  const createdAt = String(reply.createdAt || '');
+  const postReadAt = String(readByPost[String(reply.postId)] || '');
+  const readAt = [String(globalReadAt || ''), postReadAt]
+    .filter(Boolean)
+    .sort()
+    .pop() || '';
+  return !readAt || createdAt > readAt;
 }
 
 function createNotificationSnapshot_() {

@@ -247,11 +247,15 @@ test('persona history is injected into AI post prompts to reduce repetition', ()
   }).data;
   app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
     body: '会議の前に、資料より先に論点を並べ替えると見え方が変わる。',
-    tags: ['会議']
+    tags: ['会議'],
+    sourceLabel: '議事メモ',
+    sourceUrl: 'https://docs.google.com/document/d/meeting-note'
   }));
   app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
     body: '同じ課題でも、締切直前と翌朝では気づきの粒度が違う。',
-    tags: ['気づき']
+    tags: ['気づき'],
+    sourceLabel: '進行管理シート',
+    sourceUrl: 'https://docs.google.com/spreadsheets/d/progress-sheet'
   }));
 
   const prompt = app.buildPersonaGenerationPrompt_('owner@example.com', persona, { type: 'post' });
@@ -259,6 +263,10 @@ test('persona history is injected into AI post prompts to reduce repetition', ()
   assert.match(prompt, /会議の前に、資料より先に論点を並べ替えると見え方が変わる/);
   assert.match(prompt, /同じ課題でも、締切直前と翌朝では気づきの粒度が違う/);
   assert.match(prompt, /同じ論点、同じ言い回し、同じ結論は避けてください/);
+  assert.match(prompt, /最近この疑似アカウントが参照済みのWorkspace情報/);
+  assert.match(prompt, /https:\/\/docs\.google\.com\/document\/d\/meeting-note/);
+  assert.match(prompt, /https:\/\/docs\.google\.com\/spreadsheets\/d\/progress-sheet/);
+  assert.match(prompt, /同じファイル、同じURL、同じスレッド、同じメールをできるだけ避け/);
 });
 
 test('designed serendipity chooses unfinished thoughts instead of replying by chance', () => {
@@ -357,6 +365,13 @@ test('notifications cover user posts and AI posts where the user joined the thre
   assert.equal(notifications.items.length, 2);
   assert.equal(notifications.unreadCount, 2);
   assert.deepEqual(Array.from(notifications.items.map(item => item.body)), ['参加後のAI返信', 'AIからの返信']);
+  app.apiThread(userPost.id);
+  const afterUserPostOpen = app.apiNotifications().data;
+  assert.equal(afterUserPostOpen.unreadCount, 1);
+  assert.equal(afterUserPostOpen.items.find(item => item.postId === userPost.id).unread, false);
+  assert.equal(afterUserPostOpen.items.find(item => item.postId === aiPost.postId).unread, true);
+  app.apiThread(aiPost.postId);
+  assert.equal(app.apiNotifications().data.unreadCount, 0);
   assert.equal(app.apiMarkNotificationsRead().data.unreadCount, 0);
 });
 
