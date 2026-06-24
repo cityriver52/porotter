@@ -658,6 +658,7 @@
     try {
       state.thread = await callApi('apiThread', id);
       renderThread();
+      await refreshNotifications();
       queryOne('#reply-body').focus();
     } catch (error) {
       closeDialog('thread-dialog');

@@ -357,6 +357,13 @@ test('notifications cover user posts and AI posts where the user joined the thre
   assert.equal(notifications.items.length, 2);
   assert.equal(notifications.unreadCount, 2);
   assert.deepEqual(Array.from(notifications.items.map(item => item.body)), ['参加後のAI返信', 'AIからの返信']);
+  app.apiThread(userPost.id);
+  const afterUserPostOpen = app.apiNotifications().data;
+  assert.equal(afterUserPostOpen.unreadCount, 1);
+  assert.equal(afterUserPostOpen.items.find(item => item.postId === userPost.id).unread, false);
+  assert.equal(afterUserPostOpen.items.find(item => item.postId === aiPost.postId).unread, true);
+  app.apiThread(aiPost.postId);
+  assert.equal(app.apiNotifications().data.unreadCount, 0);
   assert.equal(app.apiMarkNotificationsRead().data.unreadCount, 0);
 });
 
