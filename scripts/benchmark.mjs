@@ -15,18 +15,15 @@ function rowFor(headers, record) {
 
 function seed(harness, postCount) {
   const { context, spreadsheet } = harness;
-  const postsDefinition = context.__definitions.POSTS;
-  const repliesDefinition = context.__definitions.REPLIES;
-  const posts = spreadsheet.getSheetByName(postsDefinition.name);
-  const replies = spreadsheet.getSheetByName(repliesDefinition.name);
+  const entriesDefinition = context.__definitions.ENTRIES;
+  const entries = spreadsheet.getSheetByName(entriesDefinition.name);
   const baseTime = Date.parse('2025-01-01T00:00:00.000Z');
 
-  posts.rows = [Array.from(postsDefinition.headers)];
-  replies.rows = [Array.from(repliesDefinition.headers)];
+  entries.rows = [Array.from(entriesDefinition.headers)];
   for (let index = 0; index < postCount; index += 1) {
     const id = `post-${index}`;
     const timestamp = new Date(baseTime + index * 60_000).toISOString();
-    posts.rows.push(rowFor(postsDefinition.headers, {
+    entries.rows.push(rowFor(entriesDefinition.headers, {
       id,
       body: index % 97 === 0 ? `検討対象 needle ${index}` : `仕事の気づき ${index}`,
       tags: JSON.stringify(index % 3 === 0 ? ['学び', '改善'] : ['記録']),
@@ -36,16 +33,24 @@ function seed(harness, postCount) {
       deletedAt: index % 100 === 99 ? timestamp : '',
       authorEmail: 'owner@example.com',
       authorType: 'user',
-      authorId: 'owner@example.com'
+      authorId: 'owner@example.com',
+      parentId: '',
+      rootId: id
     }));
     if (index % 4 === 0) {
-      replies.rows.push(rowFor(repliesDefinition.headers, {
+      entries.rows.push(rowFor(entriesDefinition.headers, {
         id: `reply-${index}`,
-        postId: id,
         body: `追記 ${index}`,
+        tags: '[]',
         createdAt: timestamp,
         updatedAt: timestamp,
-        authorEmail: 'owner@example.com'
+        favorite: false,
+        deletedAt: '',
+        authorEmail: 'owner@example.com',
+        authorType: 'user',
+        authorId: 'owner@example.com',
+        parentId: id,
+        rootId: id
       }));
     }
   }

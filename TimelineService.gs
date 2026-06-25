@@ -5,8 +5,9 @@
 function buildTimeline_(rawFilters, snapshot) {
   const filters = rawFilters || {};
   const email = currentUserEmail_();
-  const allReplies = snapshot && snapshot.replies || readRecords_(CONFIG_.SHEETS.REPLIES);
-  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
+  const fallbackEntries = snapshot ? null : readRecords_(CONFIG_.SHEETS.ENTRIES);
+  const allReplies = snapshot && snapshot.replies || fallbackEntries.filter(function (entry) { return entry.parentId; });
+  const allPosts = snapshot && snapshot.posts || fallbackEntries.filter(function (entry) { return !entry.parentId; });
   const activeReplies = recordsOwnedBy_(allReplies, email).filter(function (reply) {
     return !reply.deletedAt;
   });
@@ -68,7 +69,8 @@ function buildTimeline_(rawFilters, snapshot) {
 
 function buildDiscovery_(snapshot) {
   const email = currentUserEmail_();
-  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
+  const fallbackEntries = snapshot ? null : readRecords_(CONFIG_.SHEETS.ENTRIES);
+  const allPosts = snapshot && snapshot.posts || fallbackEntries.filter(function (entry) { return !entry.parentId; });
   const posts = recordsOwnedBy_(allPosts, email)
     .filter(function (post) { return !post.deletedAt; });
   const counts = replyCountsByPost_(false, snapshot && snapshot.replies, email);

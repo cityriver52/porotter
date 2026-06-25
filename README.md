@@ -43,8 +43,7 @@
   └─ Apps Script HTML Service
        ├─ 認証・入力検証・排他制御
        └─ Googleスプレッドシート
-            ├─ Posts
-            ├─ Replies
+            ├─ Entries
             ├─ Personas
             ├─ AIRequests
             └─ Settings
@@ -56,10 +55,10 @@ Workspace Studio（定時実行）
 
 Apps Script時間トリガー
   ├─ 疑似アカウントと投稿／返信を選択してAIRequestsへ追加
-  └─ GENERATED行を検証してPostsまたはRepliesへ保存
+  └─ GENERATED行を検証してEntriesへ保存
 ```
 
-スプレッドシートの行番号はIDに使わず、投稿と返信にはUUIDを割り当てます。削除はまず論理削除として扱い、ごみ箱から完全削除したときだけ行を取り除きます。
+スプレッドシートの行番号はIDに使わず、投稿と返信はどちらもEntries上の1レコードとしてUUIDを割り当てます。返信は`parentId`と`rootId`でスレッド構造を表します。削除はまず論理削除として扱い、ごみ箱から完全削除したときだけ行を取り除きます。
 
 ## セットアップ
 
@@ -106,7 +105,7 @@ Apps Scriptで「デプロイ」→「新しいデプロイ」→「ウェブア
 この処理は次を行います。
 
 - porotter Dataスプレッドシートをマイドライブに作成
-- Posts、Replies、Settings、Personas、AIRequestsシートを作成
+- Entries、Settings、Personas、AIRequestsシートを作成
 - ログイン中のGoogle Workspaceアカウントを唯一の利用許可アカウントとして保存
 
 再実行しても既存データは消えません。Apps ScriptエディタからsetupPorotterを実行する従来の方法も、復旧用として残しています。

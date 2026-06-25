@@ -17,7 +17,6 @@ function include_(filename) {
  * The effective user's email becomes the sole allowed account.
  */
 function setupPorotter() {
-  migrateLegacyProperties_();
   const email = normalizeEmail_(Session.getEffectiveUser().getEmail());
   if (!email) {
     throw new Error('Google Workspace のアカウントで setupPorotter を実行してください。');
@@ -67,7 +66,6 @@ function setupPorotterForEmail_(email) {
  * A safe diagnostic that intentionally does not return stored post content.
  */
 function checkPorotterSetup() {
-  migrateLegacyProperties_();
   const properties = PropertiesService.getScriptProperties();
   const spreadsheetId = properties.getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
   const allowedEmail = properties.getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL);

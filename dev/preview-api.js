@@ -8,11 +8,11 @@
     { id: 'p4', body: '午後の集中力は、タスクの難しさより切り替え回数に削られている気がする。', tags: ['気づき'], createdAt: iso(30), updatedAt: iso(30), favorite: true, deletedAt: '', replyCount: 0 }
   ];
   let replies = [
-    { id: 'r1', postId: 'p1', parentReplyId: '', body: '翌日読み返すと、違和感の正体は前提条件が共有されていないことだった。', createdAt: iso(0.02), updatedAt: iso(0.02), authorType: 'user', authorName: 'わたし' },
-    { id: 'r2', postId: 'p1', parentReplyId: '', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01), authorType: 'user', authorName: 'わたし' },
-    { id: 'r3', postId: 'p3', parentReplyId: '', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7), authorType: 'user', authorName: 'わたし' },
-    { id: 'r4', postId: 'p2', parentReplyId: '', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), authorType: 'user', authorName: 'わたし' },
-    { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), authorType: 'persona', authorId: 'persona-1', authorName: '横展開の連想家' }
+    { id: 'r1', postId: 'p1', parentReplyId: 'p1', body: '翌日読み返すと、違和感の正体は前提条件が共有されていないことだった。', createdAt: iso(0.02), updatedAt: iso(0.02), favorite: false, replyCount: 0, authorType: 'user', authorName: 'わたし' },
+    { id: 'r2', postId: 'p1', parentReplyId: 'p1', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01), favorite: false, replyCount: 0, authorType: 'user', authorName: 'わたし' },
+    { id: 'r3', postId: 'p3', parentReplyId: 'p3', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7), favorite: false, replyCount: 0, authorType: 'user', authorName: 'わたし' },
+    { id: 'r4', postId: 'p2', parentReplyId: 'p2', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), favorite: false, replyCount: 1, authorType: 'user', authorName: 'わたし' },
+    { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), favorite: false, replyCount: 0, authorType: 'persona', authorId: 'persona-1', authorName: '横展開の連想家' }
   ];
   let settings = { displayName: 'わたし', email: 'me@example.com', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/preview', theme: 'system', pageSize: 20, aiAutomationIntervalHours: 6, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
@@ -21,6 +21,7 @@
 
   const uuid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const activePosts = () => posts.filter(post => !post.deletedAt);
+  const entryById = id => posts.concat(replies).find(item => item.id === id);
   const syncState = () => {
     const contentCursor = posts.concat(replies)
       .flatMap(item => [item.createdAt, item.updatedAt, item.deletedAt])
@@ -101,20 +102,39 @@
       return post;
     },
     apiDeletePost: id => { const post = posts.find(item => item.id === id); post.deletedAt = new Date().toISOString(); return { id }; },
-    apiToggleFavorite: id => { const post = posts.find(item => item.id === id); post.favorite = !post.favorite; return { id, favorite: post.favorite }; },
-    apiThread: id => ({ post: posts.find(item => item.id === id), replies: replies.filter(reply => reply.postId === id) }),
+    apiToggleFavorite: id => { const entry = entryById(id); entry.favorite = !entry.favorite; return { id, favorite: entry.favorite }; },
+    apiThread: id => {
+      const selected = entryById(id);
+      const rootId = selected.postId || selected.id;
+      return { post: posts.find(item => item.id === rootId), replies: replies.filter(reply => reply.postId === rootId) };
+    },
     apiCreateReply: (postId, payload) => {
       const stamp = new Date().toISOString();
-      const reply = { id: uuid('r'), postId, parentReplyId: '', body: payload.body, createdAt: stamp, updatedAt: stamp, authorType: 'user', authorName: settings.displayName };
+      const parent = entryById(postId);
+      const rootId = parent.postId || parent.id;
+      const reply = { id: uuid('r'), postId: rootId, parentReplyId: parent.id, body: payload.body, createdAt: stamp, updatedAt: stamp, favorite: false, replyCount: 0, authorType: 'user', authorName: settings.displayName };
       replies.push(reply);
-      posts.find(item => item.id === postId).replyCount += 1;
+      posts.find(item => item.id === rootId).replyCount += 1;
+      if (parent.postId) parent.replyCount = Number(parent.replyCount || 0) + 1;
       return reply;
     },
     apiUpdateReply: (id, payload) => { const reply = replies.find(item => item.id === id); reply.body = payload.body; reply.updatedAt = new Date().toISOString(); return reply; },
     apiDeleteReply: id => {
-      const reply = replies.find(item => item.id === id);
-      if (reply) posts.find(item => item.id === reply.postId).replyCount = Math.max(0, posts.find(item => item.id === reply.postId).replyCount - 1);
-      replies = replies.filter(item => item.id !== id);
+      const deleting = new Set([id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        replies.forEach(reply => {
+          if (!deleting.has(reply.id) && deleting.has(reply.parentReplyId)) {
+            deleting.add(reply.id);
+            changed = true;
+          }
+        });
+      }
+      const deletedReplies = replies.filter(item => deleting.has(item.id));
+      replies = replies.filter(item => !deleting.has(item.id));
+      const root = deletedReplies[0] && posts.find(item => item.id === deletedReplies[0].postId);
+      if (root) root.replyCount = Math.max(0, root.replyCount - deletedReplies.length);
       return { id };
     },
     apiTrash: () => ({ posts: posts.filter(post => post.deletedAt), retentionDays: 30 }),

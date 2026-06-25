@@ -12,7 +12,7 @@ function buildNotifications_(email, snapshot) {
   }, {});
   const firstUserReplyAt = replies.reduce(function (result, reply) {
     if (String(reply.authorType || 'user') === 'persona') return result;
-    const postId = String(reply.postId);
+    const postId = String(reply.rootId || reply.postId || '');
     if (!result[postId] || String(reply.createdAt) < result[postId]) {
       result[postId] = String(reply.createdAt);
     }
@@ -24,7 +24,7 @@ function buildNotifications_(email, snapshot) {
   const items = replies
     .filter(function (reply) {
       if (String(reply.authorType || 'user') !== 'persona') return false;
-      const post = postById[String(reply.postId)];
+      const post = postById[String(reply.rootId || reply.postId || '')];
       if (!post) return false;
       if (String(post.authorType || 'user') !== 'persona') return true;
       const participatedAt = firstUserReplyAt[String(post.id)];
@@ -33,10 +33,11 @@ function buildNotifications_(email, snapshot) {
     .sort(compareCreatedDescending_)
     .slice(0, 100)
     .map(function (reply) {
-      const post = postById[String(reply.postId)];
+      const rootPostId = String(reply.rootId || reply.postId || '');
+      const post = postById[rootPostId];
       return {
         id: String(reply.id),
-        postId: String(reply.postId),
+        postId: rootPostId,
         replyId: String(reply.id),
         authorName: String(reply.authorName || 'AIアカウント'),
         body: String(reply.body || ''),
@@ -96,7 +97,7 @@ function compactNotificationPostReadAt_(readByPost) {
 
 function isNotificationUnread_(reply, globalReadAt, readByPost) {
   const createdAt = String(reply.createdAt || '');
-  const postReadAt = String(readByPost[String(reply.postId)] || '');
+  const postReadAt = String(readByPost[String(reply.rootId || reply.postId || '')] || '');
   const readAt = [String(globalReadAt || ''), postReadAt]
     .filter(Boolean)
     .sort()
@@ -105,9 +106,10 @@ function isNotificationUnread_(reply, globalReadAt, readByPost) {
 }
 
 function createNotificationSnapshot_() {
+  const entries = readRecords_(CONFIG_.SHEETS.ENTRIES);
   return {
-    posts: readRecords_(CONFIG_.SHEETS.POSTS),
-    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
+    posts: entries.filter(function (entry) { return !entry.parentId; }),
+    replies: entries.filter(function (entry) { return entry.parentId; }),
     settings: readSettings_()
   };
 }
