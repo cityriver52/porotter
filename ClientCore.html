@@ -1,0 +1,204 @@
+<!-- Client initialization, events, API bridge and settings. -->
+  document.addEventListener('DOMContentLoaded', initialize);
+
+
+  async function initialize() {
+    bindEvents();
+    renderDailyPrompt();
+    renderSkeletons();
+    try {
+      const setup = await callApi('apiSetupStatus');
+      if (!setup.authorized) throw new Error('このアプリを利用する権限がありません。');
+      if (!setup.configured) {
+        queryOne('#setup-email').textContent = setup.email;
+        queryOne('#setup-screen').hidden = false;
+      } else {
+        await loadApplication();
+      }
+    } catch (error) {
+      renderFatalError(error);
+    } finally {
+      queryOne('#initial-loader').classList.add('hidden');
+    }
+  }
+
+
+  async function loadApplication() {
+    const data = await callApi('apiBootstrap', state.filters);
+    state.settings = data.settings;
+    state.personas = data.personas || [];
+    state.notifications = data.notifications || { items: [], unreadCount: 0 };
+    state.aiAutomation = data.aiAutomation || null;
+    state.sync.cursor = normalizeSyncCursor(data.sync);
+    applyTimelineData(data.timeline, false);
+    applySettings();
+    renderTimeline();
+    renderTagFilters();
+    renderDiscovery(data.discovery);
+    renderPersonas();
+    renderNotifications();
+    renderAiAutomation();
+    queryAll('[data-app-ui]').forEach(element => { element.hidden = false; });
+    queryOne('#app').setAttribute('aria-busy', 'false');
+    scheduleBackgroundSync(SYNC_MIN_INTERVAL_MS);
+  }
+
+
+  function bindEvents() {
+    queryOne('#setup-button').addEventListener('click', runInitialSetup);
+    queryOne('#post-form').addEventListener('submit', createPost);
+    queryOne('#post-body').addEventListener('input', () => updateCount('#post-body', '#post-count'));
+    bindTagAutocomplete('post', syncQuickTagsFromInput);
+    queryOne('#quick-tags').addEventListener('click', toggleQuickTag);
+
+    queryOne('#filter-form').addEventListener('submit', applyFilters);
+    queryOne('#filter-toggle').addEventListener('click', toggleAdvancedFilters);
+    queryOne('#clear-filters').addEventListener('click', clearFilters);
+    queryOne('#tag-filter-list').addEventListener('click', filterByTag);
+    bindTagAutocomplete('search');
+    queryOne('#load-more').addEventListener('click', () => loadTimeline(true));
+    queryOne('#search-load-more').addEventListener('click', () => loadTimeline(true));
+
+    queryAll('[data-view]').forEach(button => button.addEventListener('click', () => switchView(button.dataset.view)));
+    queryOne('#side-compose-button').addEventListener('click', focusComposer);
+    queryOne('#mobile-compose-button').addEventListener('click', focusComposer);
+    queryOne('#mobile-theme-button').addEventListener('click', toggleTheme);
+
+    queryOne('#timeline').addEventListener('click', handleTimelineAction);
+    queryOne('#search-timeline').addEventListener('click', handleTimelineAction);
+    queryOne('#timeline').addEventListener('keydown', handleTimelineKeydown);
+    queryOne('#search-timeline').addEventListener('keydown', handleTimelineKeydown);
+    queryOne('#trash-list').addEventListener('click', handleTrashAction);
+    queryOne('#discovery-list').addEventListener('click', handleDiscoveryAction);
+    queryOne('#refresh-discovery').addEventListener('click', refreshDiscovery);
+    queryOne('#refresh-prompt').addEventListener('click', renderDailyPrompt);
+    queryOne('#use-prompt').addEventListener('click', useDailyPrompt);
+
+    queryOne('#reply-form').addEventListener('submit', createReply);
+    queryOne('#reply-body').addEventListener('input', () => updateCount('#reply-body', '#reply-count'));
+    queryOne('#thread-content').addEventListener('click', handleThreadAction);
+    queryOne('#edit-form').addEventListener('submit', saveEdit);
+    queryAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => closeDialog(button.dataset.closeDialog)));
+
+    queryOne('#settings-form').addEventListener('submit', saveSettings);
+    queryOne('#mark-notifications-read').addEventListener('click', markNotificationsRead);
+    queryOne('#notification-list').addEventListener('click', openNotification);
+    queryOne('#ai-install-button').addEventListener('click', installAiAutomation);
+    queryOne('#ai-uninstall-button').addEventListener('click', uninstallAiAutomation);
+    queryOne('#ai-refresh-button').addEventListener('click', () => refreshAiAutomation(true));
+    queryOne('#manual-ai-post-button').addEventListener('click', requestManualAiPost);
+    queryOne('#persona-form').addEventListener('submit', savePersona);
+    queryOne('#persona-cancel').addEventListener('click', resetPersonaForm);
+    queryOne('.persona-templates').addEventListener('click', applyPersonaTemplate);
+    queryOne('#persona-list').addEventListener('click', handlePersonaAction);
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.tag-autocomplete')) closeTagSuggestions();
+    });
+    queryOne('#confirm-cancel').addEventListener('click', () => resolveConfirmation(false));
+    queryOne('#confirm-ok').addEventListener('click', () => resolveConfirmation(true));
+    queryOne('#confirm-dialog').addEventListener('cancel', event => {
+      event.preventDefault();
+      resolveConfirmation(false);
+    });
+
+    document.addEventListener('click', event => {
+      if (!event.target.closest('.post-menu')) {
+        queryAll('.post-menu[open]').forEach(menu => menu.removeAttribute('open'));
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearBackgroundSync();
+      } else {
+        scheduleBackgroundSync(1000);
+      }
+    });
+  }
+
+
+  async function runInitialSetup() {
+    const button = queryOne('#setup-button');
+    setButtonBusy(button, true, 'セットアップ中…');
+    try {
+      await callApi('apiSetupPorotter');
+      queryOne('#setup-screen').hidden = true;
+      await loadApplication();
+      showToast('初期セットアップが完了しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+    }
+  }
+
+
+  function callApi(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      if (!window.google || !google.script || !google.script.run) {
+        reject(new Error('Apps Script の実行環境に接続できません。'));
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(result => {
+          if (result && result.ok) resolve(result.data);
+          else reject(new Error(result && result.error || '処理に失敗しました。'));
+        })
+        .withFailureHandler(error => reject(new Error(error && error.message || 'サーバーとの通信に失敗しました。')))
+        [functionName](...args);
+    });
+  }
+
+
+  function applySettings() {
+    const name = state.settings.displayName;
+    queryAll('[data-display-name]').forEach(element => { element.textContent = name; });
+    queryAll('[data-avatar]').forEach(element => { element.textContent = initials(name); });
+    queryOne('#display-name-input').value = name;
+    queryOne('#email-input').value = state.settings.email;
+    queryOne('#theme-input').value = state.settings.theme;
+    queryOne('#page-size-input').value = String(state.settings.pageSize);
+    queryOne('#ai-frequency-input').value = String(state.settings.aiAutomationIntervalHours);
+    queryOne('#data-spreadsheet-link').href = state.settings.spreadsheetUrl || '#';
+    queryOne('#persona-name').maxLength = state.settings.maxPersonaNameLength;
+    queryOne('#persona-role').maxLength = state.settings.maxPersonaRoleLength;
+    queryOne('#persona-prompt').maxLength = state.settings.maxPersonaPromptLength;
+    applyTheme(state.settings.theme);
+    queryOne('#post-body').maxLength = state.settings.maxPostLength;
+    queryOne('#reply-body').maxLength = state.settings.maxReplyLength;
+    updateCount('#post-body', '#post-count');
+    updateCount('#reply-body', '#reply-count');
+  }
+
+
+  function applyTheme(theme) {
+    if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+    else delete document.documentElement.dataset.theme;
+  }
+
+
+  function toggleTheme() {
+    const darkNow = getComputedStyle(document.documentElement).colorScheme === 'dark';
+    const next = darkNow ? 'light' : 'dark';
+    state.settings.theme = next;
+    queryOne('#theme-input').value = next;
+    applyTheme(next);
+    showToast('表示テーマを切り替えました。設定画面で保存できます。');
+  }
+
+
+  function initials(name) {
+    const value = String(name || 'me').trim();
+    if (!value) return 'me';
+    const parts = value.split(/\s+/).filter(Boolean);
+    return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : value.slice(0, 2)).toUpperCase();
+  }
+
+
+  function personaAvatarColor(personaId) {
+    const id = String(personaId || '');
+    const persona = state.personas.find(item => String(item.id) === id);
+    if (persona && PERSONA_AVATAR_COLORS.includes(persona.avatarColor)) return persona.avatarColor;
+    const seed = Array.from(id).reduce((total, character) => ((total * 31) + character.codePointAt(0)) >>> 0, 0);
+    return PERSONA_AVATAR_COLORS[seed % PERSONA_AVATAR_COLORS.length];
+  }

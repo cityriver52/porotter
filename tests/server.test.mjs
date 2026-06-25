@@ -314,6 +314,38 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
   ), /すでにAIが返信/);
 });
 
+test('sync publishes generated AI responses and returns refreshed timeline data', () => {
+  const app = createContext();
+  app.setupPorotter();
+  const persona = app.apiSavePersona('', {
+    name: '同期テスター',
+    role: '反映確認',
+    prompt: '同期で反映される投稿を作ります。',
+    enabled: true
+  }).data;
+  const before = app.apiBootstrap({}).data.sync;
+  const request = app.createPorotterAiRequest_('owner@example.com', {
+    persona,
+    activity: { type: 'post', targetSummary: '同期確認', context: { type: 'post' } },
+    actionType: '新規投稿'
+  });
+  const row = app.findRecordById_(app.__definitions.AI_REQUESTS, request.requestId);
+  app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, {
+    status: 'GENERATED',
+    generatedText: JSON.stringify({ body: '同期だけでAI投稿が反映される。', tags: ['同期'] }),
+    updatedAt: new Date(Date.now() + 1000).toISOString()
+  });
+
+  const synced = app.apiSync({ sync: before, filters: {}, includeTimeline: true, processAiResponses: true }).data;
+
+  assert.equal(synced.changed, true);
+  assert.equal(synced.contentChanged, true);
+  assert.equal(synced.aiProcessResult.publishedCount, 1);
+  assert.equal(synced.timeline.total, 1);
+  assert.equal(synced.timeline.posts[0].body, '同期だけでAI投稿が反映される。');
+  assert.equal(synced.aiAutomation.recentRequests[0].status, 'PUBLISHED');
+});
+
 test('new persona accounts receive distinct persisted avatar colors while colors are available', () => {
   const app = createContext();
   app.setupPorotter();

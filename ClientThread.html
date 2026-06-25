@@ -1,0 +1,194 @@
+<!-- Thread dialogs, replies and editing/deletion flows. -->
+
+  async function openThread(id) {
+    const dialog = queryOne('#thread-dialog');
+    queryOne('#thread-content').innerHTML = skeletonHtml(2);
+    queryOne('#reply-form').reset();
+    updateCount('#reply-body', '#reply-count');
+    dialog.showModal();
+    try {
+      state.thread = await callApi('apiThread', id);
+      renderThread();
+      await refreshNotifications();
+      queryOne('#reply-body').focus();
+    } catch (error) {
+      closeDialog('thread-dialog');
+      showToast(error.message, true);
+    }
+  }
+
+
+  function renderThread() {
+    if (!state.thread) return;
+    const replies = state.thread.replies.map(reply => {
+      const isPersona = reply.authorType === 'persona';
+      const authorName = isPersona ? (reply.authorName || 'AIアカウント') : state.settings.displayName;
+      const avatarColor = isPersona ? personaAvatarColor(reply.authorId) : '';
+      const parent = reply.parentReplyId
+        ? state.thread.replies.find(item => item.id === reply.parentReplyId)
+        : null;
+      const parentName = parent
+        ? (parent.authorType === 'persona' ? (parent.authorName || 'AIアカウント') : state.settings.displayName)
+        : '';
+      return `
+        <article class="reply-card ${reply.parentReplyId ? 'nested-reply' : ''}" data-reply-id="${escapeAttr(reply.id)}">
+          <span class="avatar ${isPersona ? 'ai' : ''}"${isPersona ? ` data-avatar-color="${escapeAttr(avatarColor)}"` : ''}>${escapeHtml(initials(authorName))}</span>
+          <div class="reply-body">
+            <div class="post-meta"><strong>${escapeHtml(authorName)}</strong>${isPersona ? '<span class="ai-badge">AI</span>' : ''}<time class="post-time" datetime="${escapeAttr(reply.createdAt)}" title="${escapeAttr(formatExactDate(reply.createdAt))}">${escapeHtml(formatRelativeDate(reply.createdAt))}</time>${reply.updatedAt !== reply.createdAt ? '<span class="edited-label">編集済み</span>' : ''}</div>
+            ${parentName ? `<div class="replying-to">${escapeHtml(parentName)}への返信</div>` : ''}
+            <p>${formatBody(reply.body)}</p>
+            ${isPersona ? '' : `<div class="reply-actions"><button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button></div>`}
+          </div>
+        </article>`;
+    }).join('');
+    queryOne('#thread-content').innerHTML = postHtml(state.thread.post, { threadRoot: true }) + (replies || '<div class="empty-state"><p>まだ返信はありません。今の考えをつなげてみましょう。</p></div>');
+    const content = queryOne('#thread-content');
+    content.scrollTop = content.scrollHeight;
+  }
+
+
+  async function createReply(event) {
+    event.preventDefault();
+    if (!state.thread) return;
+    const submit = event.submitter || queryOne('#reply-form button[type="submit"]');
+    setButtonBusy(submit, true, '返信中…');
+    try {
+      const reply = await callApi('apiCreateReply', state.thread.post.id, { body: queryOne('#reply-body').value });
+      state.thread.replies.push(reply);
+      state.thread.post.replyCount = state.thread.replies.length;
+      queryOne('#reply-form').reset();
+      updateCount('#reply-body', '#reply-count');
+      renderThread();
+      const post = state.posts.find(item => item.id === state.thread.post.id);
+      if (post) post.replyCount = state.thread.replies.length;
+      showToast('考えをスレッドにつなげました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+
+  function handleThreadAction(event) {
+    const tag = event.target.closest('[data-filter-tag]');
+    if (tag) {
+      closeDialog('thread-dialog');
+      switchView('timeline').then(() => filterByTag({ target: tag }));
+      return;
+    }
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    if (button.dataset.action === 'favorite') return toggleThreadFavorite(button.dataset.id);
+    if (button.dataset.action === 'edit-post') return openPostEditor(button.dataset.id);
+    if (button.dataset.action === 'delete-post') return deletePost(button.dataset.id, true);
+    if (button.dataset.action === 'edit-reply') return openReplyEditor(button.dataset.id);
+    if (button.dataset.action === 'delete-reply') return deleteReply(button.dataset.id);
+  }
+
+
+  async function toggleThreadFavorite(id) {
+    try {
+      const result = await callApi('apiToggleFavorite', id);
+      state.thread.post.favorite = result.favorite;
+      const post = state.posts.find(item => item.id === id);
+      if (post) post.favorite = result.favorite;
+      renderThread();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+
+  function openPostEditor(id) {
+    const post = (state.thread && state.thread.post.id === id ? state.thread.post : null) || state.posts.find(item => item.id === id);
+    if (!post) return showToast('投稿を見つけられませんでした。', true);
+    state.editTarget = { type: 'post', id: id };
+    queryOne('#edit-title').textContent = '投稿を編集';
+    queryOne('#edit-body').value = post.body;
+    queryOne('#edit-tags').value = (post.tags || []).map(tag => '#' + tag).join(' ');
+    queryOne('#edit-source-url').value = post.sourceUrl || '';
+    queryOne('#edit-tags-label').hidden = false;
+    queryOne('#edit-source-url-label').hidden = false;
+    queryOne('#edit-dialog').showModal();
+    queryOne('#edit-body').focus();
+  }
+
+
+  function openReplyEditor(id) {
+    const reply = state.thread && state.thread.replies.find(item => item.id === id);
+    if (!reply) return showToast('返信を見つけられませんでした。', true);
+    state.editTarget = { type: 'reply', id: id };
+    queryOne('#edit-title').textContent = '返信を編集';
+    queryOne('#edit-body').value = reply.body;
+    queryOne('#edit-tags').value = '';
+    queryOne('#edit-source-url').value = '';
+    queryOne('#edit-tags-label').hidden = true;
+    queryOne('#edit-source-url-label').hidden = true;
+    queryOne('#edit-dialog').showModal();
+    queryOne('#edit-body').focus();
+  }
+
+
+  async function saveEdit(event) {
+    event.preventDefault();
+    if (!state.editTarget) return;
+    const submit = event.submitter || queryOne('#edit-form button[type="submit"]');
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      if (state.editTarget.type === 'post') {
+        const updated = await callApi('apiUpdatePost', state.editTarget.id, {
+          body: queryOne('#edit-body').value,
+          tags: parseTagInput(queryOne('#edit-tags').value),
+          sourceUrl: queryOne('#edit-source-url').value
+        });
+        const index = state.posts.findIndex(item => item.id === updated.id);
+        if (index >= 0) state.posts[index] = updated;
+        if (state.thread && state.thread.post.id === updated.id) state.thread.post = updated;
+      } else {
+        const updated = await callApi('apiUpdateReply', state.editTarget.id, { body: queryOne('#edit-body').value });
+        const index = state.thread.replies.findIndex(item => item.id === updated.id);
+        if (index >= 0) state.thread.replies[index] = updated;
+      }
+      closeDialog('edit-dialog');
+      renderTimeline();
+      if (state.thread) renderThread();
+      showToast('変更を保存しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+
+  async function deletePost(id, fromThread = false) {
+    const confirmed = await confirmAction('投稿を削除しますか？', '投稿と返信をごみ箱へ移動します。あとで復元できます。', 'ごみ箱へ移動');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeletePost', id);
+      if (fromThread || (queryOne('#thread-dialog').open && state.thread && state.thread.post.id === id)) closeDialog('thread-dialog');
+      state.thread = null;
+      await loadTimeline(false);
+      showToast('投稿をごみ箱へ移動しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+
+  async function deleteReply(id) {
+    const confirmed = await confirmAction('返信を削除しますか？', 'この操作は投稿のごみ箱には表示されません。', '削除する');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeleteReply', id);
+      state.thread.replies = state.thread.replies.filter(item => item.id !== id);
+      state.thread.post.replyCount = state.thread.replies.length;
+      renderThread();
+      const post = state.posts.find(item => item.id === state.thread.post.id);
+      if (post) post.replyCount = state.thread.replies.length;
+      showToast('返信を削除しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }

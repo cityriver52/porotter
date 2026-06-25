@@ -1,0 +1,69 @@
+<!-- Shared client state and constants. -->
+  const state = {
+    settings: null,
+    personas: [],
+    notifications: { items: [], unreadCount: 0 },
+    aiAutomation: null,
+    posts: [],
+    tags: [],
+    filters: createFilters('timeline'),
+    hasMore: false,
+    total: 0,
+    currentView: 'timeline',
+    selectedTags: new Set(),
+    thread: null,
+    editTarget: null,
+    confirmResolver: null,
+    loadingTimeline: false,
+    dailyPrompt: null,
+    tagSuggestionIndex: { post: -1, search: -1 },
+    sync: {
+      cursor: { contentCursor: '', notificationsCursor: '', aiCursor: '' },
+      timer: null,
+      inFlight: false,
+      intervalMs: 60000,
+      quietRuns: 0,
+      lastToastAt: 0
+    }
+  };
+
+  const queryOne = (selector, root = document) => root.querySelector(selector);
+  const queryAll = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+  const SYNC_MIN_INTERVAL_MS = 60000;
+  const SYNC_MAX_INTERVAL_MS = 300000;
+  const SYNC_ERROR_INTERVAL_MS = 300000;
+  const SYNC_TOAST_COOLDOWN_MS = 180000;
+  const PERSONA_AVATAR_COLORS = Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']);
+  const PERSONA_TEMPLATES = {
+    finance: {
+      name: '経理の見張り番', role: '財務経理担当',
+      prompt: '数字の整合性、予算、支払時期、証跡、継続コストに目を向けます。落ち着いた口調で、見落としやすい確認点を短く指摘します。'
+    },
+    project: {
+      name: 'プロジェクト担当', role: 'このプロジェクトの担当',
+      prompt: '目的、期限、関係者、未決事項、次の具体的な一歩を意識します。現場目線で、自分が得た気づきを率直に残します。'
+    },
+    wild: {
+      name: '斜め上の発想家', role: '突飛なアイデアを出す人',
+      prompt: '前提をひっくり返し、異分野の比喩や大胆な仮説から新しい選択肢を提示します。少し遊び心があり、しかし仕事に応用できる案にします。'
+    },
+    careful: {
+      name: '横展開の連想家', role: '別業務への応用を考える人',
+      prompt: 'ある業務で見つけた工夫、失敗、判断軸を、別の業務や手順に横展開して考えます。共通する構造を見つけ、連想ゲームのように応用先を短く示します。'
+    }
+  };
+
+  const DAILY_PROMPTS = Object.freeze([
+    { id: 'perspective', question: '今日、仕事の見方が少し変わった瞬間は？', lead: '今日、仕事の見方が少し変わったのは、' },
+    { id: 'friction', question: '今日気づいた小さな違和感は？', lead: '今日気づいた小さな違和感は、' },
+    { id: 'expectation', question: '今日、予想と実際が違ったことは？', lead: '今日、予想と実際が違ったのは、' },
+    { id: 'from-others', question: '誰かの言葉や行動から気づいたことは？', lead: '誰かの言葉や行動から気づいたのは、' },
+    { id: 'went-well', question: '今日うまく進んだ理由を一つ挙げるなら？', lead: '今日うまく進んだ理由は、' },
+    { id: 'blocker', question: '仕事が止まったとき、本当の障害は何だった？', lead: '仕事が止まったとき、本当の障害だったのは、' },
+    { id: 'routine', question: '無意識に続けている作業で、変えられそうなことは？', lead: '無意識に続けている作業で、変えられそうなのは、' },
+    { id: 'other-view', question: '相手の立場に立って、初めて見えたことは？', lead: '相手の立場に立って初めて見えたのは、' },
+    { id: 'decision', question: '判断に迷った場面で、自分が大切にしたことは？', lead: '判断に迷った場面で大切にしたのは、' },
+    { id: 'lesson', question: '今日の失敗や遠回りが教えてくれたことは？', lead: '今日の失敗や遠回りが教えてくれたのは、' },
+    { id: 'tomorrow', question: '明日の自分に残しておきたい仕事のヒントは？', lead: '明日の自分に残しておきたい仕事のヒントは、' },
+    { id: 'small-change', question: '忙しさの中で見逃しかけた小さな変化は？', lead: '忙しさの中で見逃しかけた小さな変化は、' }
+  ]);

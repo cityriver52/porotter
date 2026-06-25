@@ -164,10 +164,14 @@ npm.cmd test
 | `Automation.gs` | AIRequestsキューと時間トリガーの管理 |
 | `Repository.gs` | スプレッドシートのスキーマと読み書き |
 | `Domain.gs` | 投稿・返信レコードの生成と所有者別集計 |
-| `Api.gs` | ブラウザから呼び出すアプリAPI |
+| `Api.gs` | ブラウザから呼び出す公開API |
+| `SyncService.gs` | 画面同期用の軽量カーソル管理 |
+| `TimelineService.gs` | タイムライン、検索、再提示の構築 |
+| `NotificationService.gs` | 通知一覧と既読状態の管理 |
+| `PresentationService.gs` | 表示用データ変換と共通コレクション処理 |
 | `Index.html` | 画面構造 |
 | `Styles.html` | レスポンシブデザイン |
-| `JavaScript.html` | 画面状態と操作処理 |
+| `Client*.html` | 画面状態、操作、同期、AI設定などのクライアント処理 |
 | `dev/preview-api.js` | ローカルプレビュー用のモックAPI |
 | `tests/server.test.mjs` | サーバー側の自動テスト |
 

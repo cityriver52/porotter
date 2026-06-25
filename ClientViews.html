@@ -1,0 +1,140 @@
+<!-- View switching, trash and discovery prompt behavior. -->
+
+  async function switchView(view, load = true) {
+    state.currentView = view;
+    queryAll('[data-view]').forEach(button => {
+      const active = button.dataset.view === view;
+      button.classList.toggle('active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+
+    const timelineVisible = view === 'timeline' || view === 'mine' || view === 'favorites';
+    queryOne('#timeline-view').hidden = !timelineVisible;
+    queryOne('#timeline-view').classList.toggle('active', timelineVisible);
+    queryOne('#composer').hidden = view !== 'timeline';
+    queryOne('#search-view').hidden = view !== 'search';
+    queryOne('#notifications-view').hidden = view !== 'notifications';
+    queryOne('#trash-view').hidden = view !== 'trash';
+    queryOne('#settings-view').hidden = view !== 'settings';
+
+    if (timelineVisible) {
+      queryOne('#timeline-title').textContent = view === 'favorites' ? 'お気に入り' : view === 'mine' ? '自分の投稿' : 'ホーム';
+      queryOne('#timeline-eyebrow').textContent = view === 'mine' ? 'YOUR POSTS' : view === 'favorites' ? 'SAVED THOUGHTS' : 'PRIVATE TIMELINE';
+      state.filters = createFilters(view);
+      if (load) await loadTimeline(false);
+    } else if (view === 'search') {
+      state.filters.favoriteOnly = false;
+      readFilterControls();
+      if (load) await loadTimeline(false);
+    } else if (view === 'trash') {
+      if (load) await loadTrash();
+    } else if (view === 'notifications') {
+      if (load) await refreshNotifications();
+    } else if (view === 'settings') {
+      renderPersonas();
+      renderAiAutomation();
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+
+  async function loadTrash() {
+    queryOne('#trash-list').innerHTML = skeletonHtml(2);
+    try {
+      const data = await callApi('apiTrash');
+      queryOne('#trash-list').innerHTML = data.posts.length
+        ? data.posts.map(post => postHtml(post)).join('')
+        : emptyStateHtml('ごみ箱は空です', '削除した投稿がここに表示されます。');
+    } catch (error) {
+      showToast(error.message, true);
+      renderEmptyState('ごみ箱を読み込めませんでした', error.message, '#trash-list');
+    }
+  }
+
+
+  async function handleTrashAction(event) {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+    if (button.dataset.action === 'restore') {
+      try {
+        await callApi('apiRestorePost', button.dataset.id);
+        await loadTrash();
+        showToast('投稿をタイムラインへ戻しました。');
+      } catch (error) { showToast(error.message, true); }
+    }
+    if (button.dataset.action === 'purge') {
+      const confirmed = await confirmAction('完全に削除しますか？', '投稿と返信は復元できなくなります。', '完全に削除');
+      if (!confirmed) return;
+      try {
+        await callApi('apiPermanentlyDeletePost', button.dataset.id);
+        await loadTrash();
+        showToast('投稿を完全に削除しました。');
+      } catch (error) { showToast(error.message, true); }
+    }
+  }
+
+
+  function renderDiscovery(discovery) {
+    const items = [
+      ['onThisDay', '過去の今日'],
+      ['unanswered', 'まだ続きを待っている思考'],
+      ['random', 'ランダムな再会']
+    ];
+    const html = items
+      .filter(([key]) => discovery && discovery[key])
+      .map(([key, label]) => {
+        const post = discovery[key];
+        return `<button class="discovery-item" type="button" data-post-id="${escapeAttr(post.id)}"><span class="discovery-label">${escapeHtml(label)}</span><span class="discovery-body">${escapeHtml(post.body)}</span></button>`;
+      }).join('');
+    queryOne('#discovery-list').innerHTML = html || '<div class="discovery-empty">投稿が増えると、ここで昔の思考と再会できます。</div>';
+  }
+
+
+  async function refreshDiscovery() {
+    const button = queryOne('#refresh-discovery');
+    button.disabled = true;
+    try { renderDiscovery(await callApi('apiDiscovery')); }
+    catch (error) { showToast(error.message, true); }
+    finally { button.disabled = false; }
+  }
+
+
+  function handleDiscoveryAction(event) {
+    const button = event.target.closest('[data-post-id]');
+    if (button) openThread(button.dataset.postId);
+  }
+
+
+  function chooseDailyPrompt(prompts, currentId, randomValue) {
+    if (!Array.isArray(prompts) || !prompts.length) return null;
+    const candidates = prompts.length === 1 ? prompts : prompts.filter(prompt => prompt.id !== currentId);
+    const roll = Math.max(0, Math.min(Number(randomValue) || 0, 0.999999999));
+    return candidates[Math.floor(roll * candidates.length)];
+  }
+
+
+  function renderDailyPrompt() {
+    state.dailyPrompt = chooseDailyPrompt(DAILY_PROMPTS, state.dailyPrompt && state.dailyPrompt.id, Math.random());
+    if (!state.dailyPrompt) return;
+    queryOne('#daily-prompt').textContent = state.dailyPrompt.question;
+  }
+
+
+  function useDailyPrompt() {
+    if (!state.dailyPrompt) renderDailyPrompt();
+    focusComposer();
+    queryOne('#post-body').value = state.dailyPrompt ? state.dailyPrompt.lead : '';
+    updateCount('#post-body', '#post-count');
+    queryOne('#post-body').focus();
+    queryOne('#post-body').setSelectionRange(queryOne('#post-body').value.length, queryOne('#post-body').value.length);
+  }
+
+
+  function focusComposer() {
+    if (state.currentView !== 'timeline') switchView('timeline').then(focusComposer);
+    else {
+      queryOne('#composer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => queryOne('#post-body').focus(), 250);
+    }
+  }

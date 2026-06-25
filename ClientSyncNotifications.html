@@ -1,0 +1,187 @@
+<!-- Background sync and notifications. -->
+
+  async function refreshNotifications() {
+    if (!state.settings) return;
+    try {
+      await syncApplication({
+        includeTimeline: shouldSyncTimeline(),
+        includeNotifications: state.currentView === 'notifications',
+        processAiResponses: false,
+        userVisible: state.currentView === 'notifications'
+      });
+    } catch (error) {
+      if (state.currentView === 'notifications') showToast(error.message, true);
+    }
+  }
+
+
+  function shouldSyncTimeline() {
+    return ['timeline', 'mine', 'favorites', 'search'].includes(state.currentView);
+  }
+
+
+  function clearBackgroundSync() {
+    if (state.sync.timer) {
+      window.clearTimeout(state.sync.timer);
+      state.sync.timer = null;
+    }
+  }
+
+
+  function scheduleBackgroundSync(delayMs) {
+    if (!state.settings || document.hidden) return;
+    clearBackgroundSync();
+    state.sync.timer = window.setTimeout(runBackgroundSync, Math.max(1000, Number(delayMs) || SYNC_MIN_INTERVAL_MS));
+  }
+
+
+  function nextSyncInterval(changed, failed) {
+    if (failed) {
+      state.sync.quietRuns = 0;
+      return SYNC_ERROR_INTERVAL_MS;
+    }
+    if (changed) {
+      state.sync.quietRuns = 0;
+      return SYNC_MIN_INTERVAL_MS;
+    }
+    state.sync.quietRuns += 1;
+    return Math.min(SYNC_MAX_INTERVAL_MS, SYNC_MIN_INTERVAL_MS * (state.sync.quietRuns + 1));
+  }
+
+
+  async function runBackgroundSync() {
+    if (!state.settings || document.hidden) return;
+    if (state.sync.inFlight) {
+      scheduleBackgroundSync(state.sync.intervalMs || SYNC_MIN_INTERVAL_MS);
+      return;
+    }
+    try {
+      const result = await syncApplication({
+        includeTimeline: shouldSyncTimeline(),
+        processAiResponses: true,
+        userVisible: false
+      });
+      state.sync.intervalMs = nextSyncInterval(Boolean(result && result.changed), false);
+    } catch (error) {
+      state.sync.intervalMs = nextSyncInterval(false, true);
+    } finally {
+      if (!document.hidden) scheduleBackgroundSync(state.sync.intervalMs);
+    }
+  }
+
+
+  async function syncApplication(options = {}) {
+    if (!state.settings || state.sync.inFlight) return null;
+    state.sync.inFlight = true;
+    try {
+      const includeTimeline = options.includeTimeline !== false;
+      const data = await callApi('apiSync', {
+        sync: state.sync.cursor,
+        filters: state.filters,
+        includeTimeline: includeTimeline,
+        includeNotifications: options.includeNotifications === true,
+        processAiResponses: options.processAiResponses !== false
+      });
+      applySyncData(data, { includeTimeline, userVisible: Boolean(options.userVisible) });
+      return data;
+    } finally {
+      state.sync.inFlight = false;
+    }
+  }
+
+
+  function applySyncData(data, options = {}) {
+    if (!data) return;
+    const previousIds = new Set(state.posts.map(post => String(post.id)));
+    const previousReplyCounts = state.posts.reduce((counts, post) => {
+      counts[String(post.id)] = Number(post.replyCount || 0);
+      return counts;
+    }, {});
+    if (data.sync) state.sync.cursor = normalizeSyncCursor(data.sync);
+    if (data.notifications) {
+      state.notifications = data.notifications;
+      renderNotifications();
+    }
+    if (data.aiAutomation) {
+      state.aiAutomation = data.aiAutomation;
+      renderAiAutomation();
+    }
+    if (data.timeline && options.includeTimeline) {
+      applyTimelineData(data.timeline, false);
+      renderTimeline();
+      renderTagFilters();
+      const newPostCount = state.posts.filter(post => !previousIds.has(String(post.id))).length;
+      const replyCountChanged = state.posts.some(post =>
+        previousIds.has(String(post.id)) && previousReplyCounts[String(post.id)] !== Number(post.replyCount || 0)
+      );
+      maybeToastSyncedChanges(newPostCount, replyCountChanged);
+    }
+    if (data.aiProcessError && options.userVisible) showToast(data.aiProcessError, true);
+  }
+
+
+  function maybeToastSyncedChanges(newPostCount, replyCountChanged) {
+    if ((!newPostCount && !replyCountChanged) || document.hidden) return;
+    const now = Date.now();
+    if (now - state.sync.lastToastAt < SYNC_TOAST_COOLDOWN_MS) return;
+    state.sync.lastToastAt = now;
+    if (newPostCount) {
+      showToast(newPostCount === 1 ? '新しい投稿を反映しました。' : `${newPostCount}件の新しい投稿を反映しました。`);
+    } else {
+      showToast('新しい返信を反映しました。');
+    }
+  }
+
+
+  function normalizeSyncCursor(value) {
+    return {
+      contentCursor: String(value && value.contentCursor || ''),
+      notificationsCursor: String(value && value.notificationsCursor || ''),
+      aiCursor: String(value && value.aiCursor || '')
+    };
+  }
+
+
+  function renderNotifications() {
+    const data = state.notifications || { items: [], unreadCount: 0 };
+    queryAll('[data-notification-badge]').forEach(badge => {
+      badge.textContent = data.unreadCount > 99 ? '99+' : String(data.unreadCount || 0);
+      badge.hidden = !data.unreadCount;
+    });
+    queryOne('#notification-summary').textContent = data.unreadCount
+      ? `未読の通知が${data.unreadCount}件あります。`
+      : '未読の通知はありません。';
+    queryOne('#mark-notifications-read').disabled = !data.unreadCount;
+    queryOne('#notification-list').innerHTML = data.items && data.items.length
+      ? data.items.map(item => `
+        <button class="notification-card ${item.unread ? 'unread' : ''}" type="button" data-notification-post="${escapeAttr(item.postId)}">
+          <span class="notification-dot" aria-hidden="true"></span>
+          <span class="notification-content">
+            <span class="notification-meta"><strong>${escapeHtml(item.authorName)}</strong><span>から返信</span><time datetime="${escapeAttr(item.createdAt)}">${escapeHtml(formatRelativeDate(item.createdAt))}</time></span>
+            <p>${escapeHtml(item.body)}</p>
+            <span class="notification-context">元の投稿：${escapeHtml(item.postBody)}</span>
+          </span>
+        </button>`).join('')
+      : emptyStateHtml('通知はまだありません', '自分の投稿や、自分が参加したスレッドにAIから返信がつくと、ここに表示されます。');
+  }
+
+
+  async function markNotificationsRead() {
+    const button = queryOne('#mark-notifications-read');
+    setButtonBusy(button, true, '更新中…');
+    try {
+      state.notifications = await callApi('apiMarkNotificationsRead');
+      renderNotifications();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderNotifications();
+    }
+  }
+
+
+  function openNotification(event) {
+    const button = event.target.closest('[data-notification-post]');
+    if (button) openThread(button.dataset.notificationPost);
+  }

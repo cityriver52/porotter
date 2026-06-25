@@ -1,0 +1,211 @@
+<!-- Composer and tag autocomplete behavior. -->
+
+  function createFilters(view) {
+    return {
+      query: '',
+      tag: '',
+      startDate: '',
+      endDate: '',
+      replyState: '',
+      favoriteOnly: view === 'favorites',
+      authorType: view === 'mine' ? 'user' : '',
+      offset: 0
+    };
+  }
+
+
+  function applyTimelineData(data, append) {
+    state.posts = append ? state.posts.concat(data.posts) : data.posts;
+    state.tags = data.tags;
+    state.total = data.total;
+    state.hasMore = data.hasMore;
+    state.filters.offset = data.nextOffset;
+  }
+
+
+  async function createPost(event) {
+    event.preventDefault();
+    const submit = queryOne('#post-submit');
+    const body = queryOne('#post-body').value;
+    const tags = parseTagInput(queryOne('#post-tags').value);
+    const sourceUrl = queryOne('#post-source-url').value;
+    setButtonBusy(submit, true, '投稿中…');
+    try {
+      const post = await callApi('apiCreatePost', { body, tags, sourceUrl });
+      state.posts.unshift(post);
+      state.total += 1;
+      queryOne('#post-form').reset();
+      state.selectedTags.clear();
+      queryAll('.tag-toggle.selected').forEach(button => button.classList.remove('selected'));
+      updateCount('#post-body', '#post-count');
+      await loadTimeline(false);
+      showToast('つぶやきを残しました。');
+      queryOne('#post-body').focus();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }
+
+
+  function toggleQuickTag(event) {
+    const button = event.target.closest('[data-quick-tag]');
+    if (!button) return;
+    const tag = button.dataset.quickTag;
+    if (state.selectedTags.has(tag)) state.selectedTags.delete(tag);
+    else if (state.selectedTags.size < (state.settings ? state.settings.maxTags : 5)) state.selectedTags.add(tag);
+    else return showToast('タグは5個まで指定できます。', true);
+    button.classList.toggle('selected', state.selectedTags.has(tag));
+    queryOne('#post-tags').value = Array.from(state.selectedTags).map(item => '#' + item).join(' ');
+  }
+
+
+  function syncQuickTagsFromInput() {
+    state.selectedTags = new Set(parseTagInput(queryOne('#post-tags').value));
+    queryAll('.tag-toggle').forEach(button => button.classList.toggle('selected', state.selectedTags.has(button.dataset.quickTag)));
+  }
+
+
+  function parseTagInput(value) {
+    const seen = new Set();
+    return String(value || '')
+      .split(/[\s,、]+/)
+      .map(item => item.replace(/^#+/, '').trim())
+      .filter(item => {
+        const key = item.toLocaleLowerCase();
+        if (!item || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+
+  function normalizeSingleTag(value) {
+    return parseTagInput(value)[0] || '';
+  }
+
+
+  function currentTagFragment(value, multiple) {
+    const text = String(value || '');
+    if (!multiple) return text.replace(/^#+/, '').trim();
+    let start = text.length;
+    while (start > 0 && !/[\s,、]/.test(text[start - 1])) start -= 1;
+    return text.slice(start).replace(/^#+/, '').trim();
+  }
+
+
+  function replaceCurrentTag(value, tag, multiple) {
+    if (!multiple) return '#' + tag;
+    const text = String(value || '');
+    let start = text.length;
+    while (start > 0 && !/[\s,、]/.test(text[start - 1])) start -= 1;
+    return text.slice(0, start) + '#' + tag + ' ';
+  }
+
+
+  function matchingTags(tags, query, excluded) {
+    const needle = String(query || '').toLocaleLowerCase();
+    const excludedKeys = new Set((excluded || []).map(item => String(item).toLocaleLowerCase()));
+    return (tags || [])
+      .filter(tag => !excludedKeys.has(String(tag.name).toLocaleLowerCase()))
+      .filter(tag => !needle || String(tag.name).toLocaleLowerCase().includes(needle))
+      .sort((a, b) => {
+        const aName = String(a.name).toLocaleLowerCase();
+        const bName = String(b.name).toLocaleLowerCase();
+        const aStarts = needle && aName.startsWith(needle) ? 1 : 0;
+        const bStarts = needle && bName.startsWith(needle) ? 1 : 0;
+        return bStarts - aStarts || Number(b.count || 0) - Number(a.count || 0) || String(a.name).localeCompare(String(b.name), 'ja');
+      })
+      .slice(0, 8);
+  }
+
+
+  function tagAutocompleteConfig(mode) {
+    return mode === 'post'
+      ? { input: '#post-tags', list: '#post-tag-suggestions', multiple: true }
+      : { input: '#search-tag', list: '#search-tag-suggestions', multiple: false };
+  }
+
+
+  function bindTagAutocomplete(mode, onInput) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    const list = queryOne(config.list);
+    input.addEventListener('input', () => {
+      if (onInput) onInput();
+      renderTagSuggestions(mode);
+    });
+    input.addEventListener('focus', () => renderTagSuggestions(mode));
+    input.addEventListener('keydown', event => handleTagSuggestionKeys(event, mode));
+    list.addEventListener('mousedown', event => event.preventDefault());
+    list.addEventListener('click', event => selectTagSuggestion(event, mode));
+  }
+
+
+  function renderTagSuggestions(mode) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    const list = queryOne(config.list);
+    const query = currentTagFragment(input.value, config.multiple);
+    const excluded = config.multiple ? parseTagInput(input.value).filter(tag => tag.toLocaleLowerCase() !== query.toLocaleLowerCase()) : [];
+    const matches = matchingTags(state.tags, query, excluded);
+    state.tagSuggestionIndex[mode] = -1;
+    list.innerHTML = matches.map(tag => `
+      <button type="button" role="option" data-tag-suggestion="${escapeAttr(tag.name)}">
+        <span>#${escapeHtml(tag.name)}</span><small>${Number(tag.count || 0)}件</small>
+      </button>`).join('');
+    list.hidden = matches.length === 0;
+    input.setAttribute('aria-expanded', String(matches.length > 0));
+  }
+
+
+  function closeTagSuggestions(mode) {
+    const modes = mode ? [mode] : ['post', 'search'];
+    modes.forEach(item => {
+      const config = tagAutocompleteConfig(item);
+      queryOne(config.list).hidden = true;
+      queryOne(config.input).setAttribute('aria-expanded', 'false');
+      state.tagSuggestionIndex[item] = -1;
+    });
+  }
+
+
+  function chooseTagSuggestion(mode, tag) {
+    const config = tagAutocompleteConfig(mode);
+    const input = queryOne(config.input);
+    input.value = replaceCurrentTag(input.value, tag, config.multiple);
+    if (mode === 'post') syncQuickTagsFromInput();
+    closeTagSuggestions(mode);
+    input.focus();
+  }
+
+
+  function selectTagSuggestion(event, mode) {
+    const button = event.target.closest('[data-tag-suggestion]');
+    if (button) chooseTagSuggestion(mode, button.dataset.tagSuggestion);
+  }
+
+
+  function handleTagSuggestionKeys(event, mode) {
+    const config = tagAutocompleteConfig(mode);
+    const list = queryOne(config.list);
+    if (event.key === 'Escape') return closeTagSuggestions(mode);
+    if (list.hidden && event.key === 'ArrowDown') renderTagSuggestions(mode);
+    const options = queryAll('[data-tag-suggestion]', list);
+    if (!options.length) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowDown' ? 1 : -1;
+      state.tagSuggestionIndex[mode] = (state.tagSuggestionIndex[mode] + direction + options.length) % options.length;
+      options.forEach((option, index) => {
+        const active = index === state.tagSuggestionIndex[mode];
+        option.classList.toggle('active', active);
+        option.setAttribute('aria-selected', String(active));
+      });
+      options[state.tagSuggestionIndex[mode]].scrollIntoView({ block: 'nearest' });
+    } else if (event.key === 'Enter' && state.tagSuggestionIndex[mode] >= 0) {
+      event.preventDefault();
+      chooseTagSuggestion(mode, options[state.tagSuggestionIndex[mode]].dataset.tagSuggestion);
+    }
+  }

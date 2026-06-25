@@ -172,5 +172,7 @@ function ensureDefaultSettings_(email) {
     defaults.aiAutomationIntervalHours = String(normalizeAiAutomationIntervalHours_(settings));
   }
   if (!settings.notificationsReadAt) defaults.notificationsReadAt = nowIso_();
+  if (!settings.contentUpdatedAt) defaults.contentUpdatedAt = nowIso_();
+  if (!settings.notificationsUpdatedAt) defaults.notificationsUpdatedAt = nowIso_();
   if (Object.keys(defaults).length) writeSettings_(defaults);
 }

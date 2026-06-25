@@ -6,7 +6,11 @@ import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const client = fs.readFileSync(path.join(root, 'JavaScript.html'), 'utf8');
+const clientPartials = [
+  'ClientState', 'ClientCore', 'ClientComposer', 'ClientTimeline', 'ClientThread',
+  'ClientViews', 'ClientSyncNotifications', 'ClientPersonasAiSettings', 'ClientDialogsUtils'
+];
+const client = clientPartials.map(name => fs.readFileSync(path.join(root, `${name}.html`), 'utf8')).join('\n');
 const start = client.indexOf('  function formatBody(value)');
 const end = client.indexOf('  function formatRelativeDate(value)');
 
@@ -117,7 +121,7 @@ test('post cards render separate reference links and account-specific AI colors'
   const html = postContext.postHtml({
     id: 'ai-post', body: '短い気づき', tags: [], createdAt: '2026-06-22T00:00:00.000Z',
     updatedAt: '2026-06-22T00:00:00.000Z', authorType: 'persona', authorId: 'persona-1',
-    authorName: '細部に気づく人', sourceUrl: 'https://docs.google.com/document/d/example', sourceLabel: '参考資料'
+    authorName: '横展開の連想家', sourceUrl: 'https://docs.google.com/document/d/example', sourceLabel: '参考資料'
   });
 
   assert.match(html, /data-avatar-color="teal"/);

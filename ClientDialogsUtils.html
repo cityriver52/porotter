@@ -1,0 +1,151 @@
+<!-- Dialog, toast, skeleton, formatting and escaping helpers. -->
+
+  function confirmAction(title, message, buttonLabel) {
+    queryOne('#confirm-title').textContent = title;
+    queryOne('#confirm-message').textContent = message;
+    queryOne('#confirm-ok').textContent = buttonLabel;
+    queryOne('#confirm-dialog').showModal();
+    return new Promise(resolve => { state.confirmResolver = resolve; });
+  }
+
+
+  function resolveConfirmation(value) {
+    closeDialog('confirm-dialog');
+    if (state.confirmResolver) state.confirmResolver(value);
+    state.confirmResolver = null;
+  }
+
+
+  function closeDialog(id) {
+    const dialog = queryOne('#' + id);
+    if (dialog && dialog.open) dialog.close();
+  }
+
+
+  function setButtonBusy(button, busy, busyLabel) {
+    if (!button) return;
+    if (busy) {
+      button.dataset.originalLabel = button.textContent;
+      button.textContent = busyLabel;
+      button.disabled = true;
+    } else {
+      if (button.dataset.originalLabel) button.textContent = button.dataset.originalLabel;
+      delete button.dataset.originalLabel;
+      button.disabled = false;
+    }
+  }
+
+
+  function updateCount(inputSelector, countSelector) {
+    const input = queryOne(inputSelector);
+    const count = queryOne(countSelector);
+    const max = Number(input.maxLength) > 0 ? Number(input.maxLength) : 280;
+    const length = Array.from(input.value).length;
+    count.textContent = `${length} / ${max}`;
+    count.classList.toggle('near-limit', length >= max * .8 && length < max);
+    count.classList.toggle('at-limit', length >= max);
+  }
+
+
+  function renderSkeletons() {
+    const targets = timelineTargets();
+    queryOne(targets.list).innerHTML = skeletonHtml(3);
+    queryOne(targets.status).textContent = '読み込み中…';
+  }
+
+
+  function skeletonHtml(count) {
+    return Array.from({ length: count }, () => '<div class="skeleton-card" aria-hidden="true"><span class="skeleton skeleton-avatar"></span><div class="skeleton-lines"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton"></span></div></div>').join('');
+  }
+
+
+  function emptyStateHtml(title, message) {
+    return `<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">◌</span><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p></div>`;
+  }
+
+
+  function renderEmptyState(title, message, selector = '#timeline') {
+    queryOne(selector).innerHTML = emptyStateHtml(title, message);
+  }
+
+
+  function renderFatalError(error) {
+    state.posts = [];
+    queryOne('#setup-screen').hidden = true;
+    queryAll('[data-app-ui]').forEach(element => { element.hidden = false; });
+    queryOne('#timeline').innerHTML = emptyStateHtml('ぽろったーを開けませんでした', error.message);
+    queryOne('#timeline-status').textContent = '';
+    showToast(error.message, true);
+  }
+
+
+  function showToast(message, isError = false) {
+    const toast = document.createElement('div');
+    toast.className = 'toast' + (isError ? ' error' : '');
+    toast.textContent = message;
+    queryOne('#toast-region').appendChild(toast);
+    setTimeout(() => toast.remove(), 4200);
+  }
+
+
+  function formatBody(value) {
+    const text = String(value || '');
+    const urlPattern = /(?:https?:\/\/|www\.)[^\s<>"']+/giu;
+    let cursor = 0;
+    let html = '';
+
+    for (const match of text.matchAll(urlPattern)) {
+      const original = match[0];
+      let url = original;
+      let trailing = '';
+
+      while (/[.,!?;:)。、！？）」』】〉》\]\}]$/u.test(url)) {
+        trailing = url.slice(-1) + trailing;
+        url = url.slice(0, -1);
+      }
+      if (!url) continue;
+
+      html += escapeHtml(text.slice(cursor, match.index));
+      const href = /^www\./i.test(url) ? 'https://' + url : url;
+      html += `<a class="post-link" href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(url)}</a>`;
+      html += escapeHtml(trailing);
+      cursor = match.index + original.length;
+    }
+
+    html += escapeHtml(text.slice(cursor));
+    return html.replace(/\n/g, '<br>');
+  }
+
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/`/g, '&#096;');
+  }
+
+
+  function formatRelativeDate(value) {
+    const date = new Date(value);
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (!Number.isFinite(seconds)) return '';
+    if (seconds < 30) return 'いま';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}分`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}時間`;
+    if (seconds < 604800) return `${Math.floor(seconds / 86400)}日`;
+    return new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric' }).format(date);
+  }
+
+
+  function formatExactDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('ja-JP', { dateStyle: 'long', timeStyle: 'short' }).format(date);
+  }
