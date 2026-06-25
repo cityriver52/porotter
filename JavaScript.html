@@ -152,8 +152,6 @@
     document.addEventListener('click', event => {
       if (!event.target.closest('.tag-autocomplete')) closeTagSuggestions();
     });
-    queryAll('[data-export]').forEach(button => button.addEventListener('click', () => exportData(button.dataset.export, button)));
-
     queryOne('#confirm-cancel').addEventListener('click', () => resolveConfirmation(false));
     queryOne('#confirm-ok').addEventListener('click', () => resolveConfirmation(true));
     queryOne('#confirm-dialog').addEventListener('cancel', event => {
@@ -211,8 +209,8 @@
     queryOne('#email-input').value = state.settings.email;
     queryOne('#theme-input').value = state.settings.theme;
     queryOne('#page-size-input').value = String(state.settings.pageSize);
-    queryOne('#ai-post-frequency-input').value = String(state.settings.aiPostIntervalHours);
-    queryOne('#ai-reply-frequency-input').value = String(state.settings.aiReplyIntervalHours);
+    queryOne('#ai-frequency-input').value = String(state.settings.aiAutomationIntervalHours);
+    queryOne('#data-spreadsheet-link').href = state.settings.spreadsheetUrl || '#';
     queryOne('#persona-name').maxLength = state.settings.maxPersonaNameLength;
     queryOne('#persona-role').maxLength = state.settings.maxPersonaRoleLength;
     queryOne('#persona-prompt').maxLength = state.settings.maxPersonaPromptLength;
@@ -1240,8 +1238,7 @@
         displayName: queryOne('#display-name-input').value,
         theme: queryOne('#theme-input').value,
         pageSize: Number(queryOne('#page-size-input').value),
-        aiPostIntervalHours: Number(queryOne('#ai-post-frequency-input').value),
-        aiReplyIntervalHours: Number(queryOne('#ai-reply-frequency-input').value)
+        aiAutomationIntervalHours: Number(queryOne('#ai-frequency-input').value)
       });
       applySettings();
       showToast('設定を保存しました。');
@@ -1249,27 +1246,6 @@
       showToast(error.message, true);
     } finally {
       setButtonBusy(submit, false);
-    }
-  }
-
-  async function exportData(format, button) {
-    setButtonBusy(button, true, '準備中…');
-    try {
-      const data = await callApi('apiExport', format);
-      const blob = new Blob([data.content], { type: data.mimeType });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = data.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showToast('バックアップを書き出しました。');
-    } catch (error) {
-      showToast(error.message, true);
-    } finally {
-      setButtonBusy(button, false);
     }
   }
 
