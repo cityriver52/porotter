@@ -1,5 +1,4 @@
 function getSpreadsheet_() {
-  migrateLegacyProperties_();
   const id = PropertiesService.getScriptProperties().getProperty(CONFIG_.PROPERTY_SPREADSHEET_ID);
   if (!id) {
     throw new Error('保存先が設定されていません。setupPorotter を実行してください。');

@@ -4,8 +4,6 @@ const CONFIG_ = Object.freeze({
   SPREADSHEET_NAME: 'porotter Data',
   PROPERTY_SPREADSHEET_ID: 'POROTTER_SPREADSHEET_ID',
   PROPERTY_ALLOWED_EMAIL: 'POROTTER_ALLOWED_EMAIL',
-  LEGACY_PROPERTY_SPREADSHEET_ID: ['MY', 'SNS_SPREADSHEET_ID'].join(''),
-  LEGACY_PROPERTY_ALLOWED_EMAIL: ['MY', 'SNS_ALLOWED_EMAIL'].join(''),
   MAX_POST_LENGTH: 280,
   MAX_REPLY_LENGTH: 280,
   MAX_TAGS: 5,
@@ -34,20 +32,13 @@ const CONFIG_ = Object.freeze({
     ERROR: 'ERROR'
   }),
   SHEETS: Object.freeze({
-    POSTS: Object.freeze({
-      name: 'Posts',
+    ENTRIES: Object.freeze({
+      name: 'Entries',
       headers: Object.freeze([
         'id', 'body', 'tags', 'createdAt', 'updatedAt',
         'favorite', 'deletedAt', 'authorEmail', 'authorType',
-        'authorId', 'authorName', 'sourceLabel', 'sourceUrl'
-      ])
-    }),
-    REPLIES: Object.freeze({
-      name: 'Replies',
-      headers: Object.freeze([
-        'id', 'postId', 'body', 'createdAt', 'updatedAt',
-        'deletedAt', 'authorEmail', 'parentReplyId', 'authorType',
-        'authorId', 'authorName'
+        'authorId', 'authorName', 'sourceLabel', 'sourceUrl',
+        'parentId', 'rootId'
       ])
     }),
     SETTINGS: Object.freeze({
@@ -73,19 +64,6 @@ const CONFIG_ = Object.freeze({
   })
 });
 
-function migrateLegacyProperties_() {
-  const properties = PropertiesService.getScriptProperties();
-  const mappings = [
-    [CONFIG_.PROPERTY_SPREADSHEET_ID, CONFIG_.LEGACY_PROPERTY_SPREADSHEET_ID],
-    [CONFIG_.PROPERTY_ALLOWED_EMAIL, CONFIG_.LEGACY_PROPERTY_ALLOWED_EMAIL]
-  ];
-  mappings.forEach(function (mapping) {
-    if (properties.getProperty(mapping[0])) return;
-    const legacyValue = properties.getProperty(mapping[1]);
-    if (legacyValue) properties.setProperty(mapping[0], legacyValue);
-  });
-}
-
 function normalizeEmail_(email) {
   return String(email || '').trim().toLowerCase();
 }
@@ -101,7 +79,6 @@ function currentUserEmail_() {
 }
 
 function assertAuthorized_() {
-  migrateLegacyProperties_();
   const allowedEmail = normalizeEmail_(
     PropertiesService.getScriptProperties().getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL)
   );

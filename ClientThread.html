@@ -4,6 +4,7 @@
     const dialog = queryOne('#thread-dialog');
     queryOne('#thread-content').innerHTML = skeletonHtml(2);
     queryOne('#reply-form').reset();
+    state.replyTargetId = '';
     updateCount('#reply-body', '#reply-count');
     dialog.showModal();
     try {
@@ -30,14 +31,19 @@
       const parentName = parent
         ? (parent.authorType === 'persona' ? (parent.authorName || 'AIアカウント') : state.settings.displayName)
         : '';
+      const nested = reply.parentReplyId && reply.parentReplyId !== state.thread.post.id;
       return `
-        <article class="reply-card ${reply.parentReplyId ? 'nested-reply' : ''}" data-reply-id="${escapeAttr(reply.id)}">
+        <article class="reply-card ${nested ? 'nested-reply' : ''}" data-reply-id="${escapeAttr(reply.id)}">
           <span class="avatar ${isPersona ? 'ai' : ''}"${isPersona ? ` data-avatar-color="${escapeAttr(avatarColor)}"` : ''}>${escapeHtml(initials(authorName))}</span>
           <div class="reply-body">
             <div class="post-meta"><strong>${escapeHtml(authorName)}</strong>${isPersona ? '<span class="ai-badge">AI</span>' : ''}<time class="post-time" datetime="${escapeAttr(reply.createdAt)}" title="${escapeAttr(formatExactDate(reply.createdAt))}">${escapeHtml(formatRelativeDate(reply.createdAt))}</time>${reply.updatedAt !== reply.createdAt ? '<span class="edited-label">編集済み</span>' : ''}</div>
-            ${parentName ? `<div class="replying-to">${escapeHtml(parentName)}への返信</div>` : ''}
+            ${nested && parentName ? `<div class="replying-to">${escapeHtml(parentName)}への返信</div>` : ''}
             <p>${formatBody(reply.body)}</p>
-            ${isPersona ? '' : `<div class="reply-actions"><button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button></div>`}
+            <div class="reply-actions">
+              <button type="button" data-action="reply-to-entry" data-id="${escapeAttr(reply.id)}">返信${Number(reply.replyCount) || ''}</button>
+              <button type="button" class="${reply.favorite ? 'active' : ''}" data-action="favorite-reply" data-id="${escapeAttr(reply.id)}">${reply.favorite ? '♥' : '♡'}</button>
+              ${isPersona ? '' : `<button type="button" data-action="edit-reply" data-id="${escapeAttr(reply.id)}">編集</button><button type="button" data-action="delete-reply" data-id="${escapeAttr(reply.id)}">削除</button>`}
+            </div>
           </div>
         </article>`;
     }).join('');
@@ -53,10 +59,15 @@
     const submit = event.submitter || queryOne('#reply-form button[type="submit"]');
     setButtonBusy(submit, true, '返信中…');
     try {
-      const reply = await callApi('apiCreateReply', state.thread.post.id, { body: queryOne('#reply-body').value });
+      const targetId = state.replyTargetId || state.thread.post.id;
+      const reply = await callApi('apiCreateReply', targetId, { body: queryOne('#reply-body').value });
       state.thread.replies.push(reply);
       state.thread.post.replyCount = state.thread.replies.length;
+      const parentReply = state.thread.replies.find(item => item.id === targetId);
+      if (parentReply) parentReply.replyCount = Number(parentReply.replyCount || 0) + 1;
+      state.replyTargetId = '';
       queryOne('#reply-form').reset();
+      queryOne('#reply-body').placeholder = '考えをつなげる…';
       updateCount('#reply-body', '#reply-count');
       renderThread();
       const post = state.posts.find(item => item.id === state.thread.post.id);
@@ -80,6 +91,9 @@
     const button = event.target.closest('[data-action]');
     if (!button) return;
     if (button.dataset.action === 'favorite') return toggleThreadFavorite(button.dataset.id);
+    if (button.dataset.action === 'reply') return setRootReplyTarget();
+    if (button.dataset.action === 'favorite-reply') return toggleReplyFavorite(button.dataset.id);
+    if (button.dataset.action === 'reply-to-entry') return setReplyTarget(button.dataset.id);
     if (button.dataset.action === 'edit-post') return openPostEditor(button.dataset.id);
     if (button.dataset.action === 'delete-post') return deletePost(button.dataset.id, true);
     if (button.dataset.action === 'edit-reply') return openReplyEditor(button.dataset.id);
@@ -97,6 +111,33 @@
     } catch (error) {
       showToast(error.message, true);
     }
+  }
+
+  async function toggleReplyFavorite(id) {
+    try {
+      const result = await callApi('apiToggleFavorite', id);
+      const reply = state.thread && state.thread.replies.find(item => item.id === id);
+      if (reply) reply.favorite = result.favorite;
+      renderThread();
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  }
+
+  function setReplyTarget(id) {
+    const reply = state.thread && state.thread.replies.find(item => item.id === id);
+    if (!reply) return;
+    state.replyTargetId = id;
+    const authorName = reply.authorType === 'persona' ? (reply.authorName || 'AIアカウント') : state.settings.displayName;
+    queryOne('#reply-body').placeholder = `${authorName}へ返信…`;
+    queryOne('#reply-body').focus();
+  }
+
+  function setRootReplyTarget() {
+    if (!state.thread) return;
+    state.replyTargetId = state.thread.post.id;
+    queryOne('#reply-body').placeholder = 'この投稿へ返信…';
+    queryOne('#reply-body').focus();
   }
 
 
@@ -182,8 +223,7 @@
     if (!confirmed) return;
     try {
       await callApi('apiDeleteReply', id);
-      state.thread.replies = state.thread.replies.filter(item => item.id !== id);
-      state.thread.post.replyCount = state.thread.replies.length;
+      state.thread = await callApi('apiThread', state.thread.post.id);
       renderThread();
       const post = state.posts.find(item => item.id === state.thread.post.id);
       if (post) post.replyCount = state.thread.replies.length;

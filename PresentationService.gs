@@ -42,14 +42,16 @@ function presentPost_(record, replyCount) {
   };
 }
 
-function presentReply_(record) {
+function presentReply_(record, replyCount) {
   return {
     id: String(record.id),
-    postId: String(record.postId),
-    parentReplyId: String(record.parentReplyId || ''),
+    postId: String(record.rootId || record.postId || ''),
+    parentReplyId: String(record.parentId || record.parentReplyId || ''),
     body: String(record.body || ''),
     createdAt: String(record.createdAt || ''),
     updatedAt: String(record.updatedAt || record.createdAt || ''),
+    favorite: parseBoolean_(record.favorite),
+    replyCount: Number(replyCount || 0),
     authorType: String(record.authorType || 'user'),
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || '')
@@ -97,14 +99,14 @@ function presentPersona_(record) {
 }
 
 function activeReplyCount_(postId) {
-  return readRecords_(CONFIG_.SHEETS.REPLIES).filter(function (reply) {
-    return String(reply.postId) === String(postId) && !reply.deletedAt;
+  return readRecords_(CONFIG_.SHEETS.ENTRIES).filter(function (entry) {
+    return String(entry.rootId) === String(postId) && String(entry.id) !== String(postId) && !entry.deletedAt;
   }).length;
 }
 
 function replyCountsByPost_(includeDeleted, records, email) {
-  const replies = records || readRecords_(CONFIG_.SHEETS.REPLIES);
-  return countRepliesByPost_(email ? recordsOwnedBy_(replies, email) : replies, includeDeleted);
+  const entries = records || readRecords_(CONFIG_.SHEETS.ENTRIES);
+  return countRepliesByPost_(email ? recordsOwnedBy_(entries, email) : entries, includeDeleted);
 }
 
 function compareCreatedDescending_(a, b) {

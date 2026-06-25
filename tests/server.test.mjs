@@ -80,23 +80,25 @@ test('validation and authorization are enforced on the server', () => {
   assert.match(denied.error, /権限/);
 });
 
-test('existing reply rows are preserved when AI reply metadata columns are added', () => {
-  const harness = createAppsScriptHarness(root);
-  const app = harness.context;
+test('entries support replies to replies and favorites on replies', () => {
+  const app = createContext();
   app.setupPorotter();
-  const post = app.apiCreatePost({ body: '移行前の投稿', tags: [] }).data;
-  const reply = app.apiCreateReply(post.id, { body: '移行前の返信' }).data;
-  const replySheet = harness.spreadsheet.getSheetByName('Replies');
-  replySheet.rows = replySheet.rows.map(row => row.slice(0, 7));
+  const post = app.apiCreatePost({ body: '親投稿', tags: [] }).data;
+  const firstReply = app.apiCreateReply(post.id, { body: '最初の返信' }).data;
+  const nestedReply = app.apiCreateReply(firstReply.id, { body: '返信への返信' }).data;
 
-  app.setupPorotter();
+  assert.equal(firstReply.postId, post.id);
+  assert.equal(firstReply.parentReplyId, post.id);
+  assert.equal(nestedReply.postId, post.id);
+  assert.equal(nestedReply.parentReplyId, firstReply.id);
 
-  assert.deepEqual(Array.from(replySheet.rows[0]), Array.from(app.__definitions.REPLIES.headers));
+  const favorite = app.apiToggleFavorite(firstReply.id).data;
+  assert.equal(favorite.favorite, true);
+
   const thread = app.apiThread(post.id).data;
-  assert.equal(thread.replies[0].id, reply.id);
-  assert.equal(thread.replies[0].body, '移行前の返信');
-  assert.equal(thread.replies[0].authorType, 'user');
-  assert.equal(thread.replies[0].parentReplyId, '');
+  assert.equal(thread.post.replyCount, 2);
+  assert.equal(thread.replies.find(reply => reply.id === firstReply.id).favorite, true);
+  assert.equal(thread.replies.find(reply => reply.id === firstReply.id).replyCount, 1);
 });
 
 test('timeline filters, pagination, settings and permanent deletion work', () => {
@@ -207,8 +209,6 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
 test('REQUESTED queue rows do not block later AI request creation', () => {
   const app = createContext();
   app.setupPorotter();
-  assert.equal(typeof app.preparePorterAiRequest, 'function');
-  assert.equal(typeof app.processPorterAiResponses, 'function');
   const persona = app.apiSavePersona('', {
     name: '待機をほどく人',
     role: '流れを止めない',
@@ -306,7 +306,7 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
   assert.equal(thread.replies.length, 1);
   assert.equal(thread.replies[0].authorType, 'persona');
   assert.equal(thread.replies[0].authorName, persona.name);
-  assert.equal(thread.replies[0].parentReplyId, '');
+  assert.equal(thread.replies[0].parentReplyId, first.id);
   assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
   assert.throws(() => app.publishGeneratedPorotter_(
     'owner@example.com', persona.id, replyActivity.context,
@@ -371,7 +371,7 @@ test('notifications cover user posts and AI posts where the user joined the thre
   app.writeSettings_({ notificationsReadAt: '2000-01-01T00:00:00.000Z' });
   const baseTime = Date.now() - 5000;
   const future = new Date(baseTime + 1000).toISOString();
-  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+  app.appendRecord_(app.__definitions.ENTRIES, app.createReplyRecord_({
     postId: userPost.id, email: 'owner@example.com', body: 'AIからの返信', timestamp: future,
     authorType: 'persona', authorId: persona.id, authorName: persona.name
   }));
@@ -379,15 +379,15 @@ test('notifications cover user posts and AI posts where the user joined the thre
   const aiPost = app.publishGeneratedPorotter_('owner@example.com', persona.id, { type: 'post' }, JSON.stringify({
     body: 'AIの投稿', tags: []
   }));
-  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+  app.appendRecord_(app.__definitions.ENTRIES, app.createReplyRecord_({
     postId: aiPost.postId, email: 'owner@example.com', body: '参加前のAI返信',
     timestamp: new Date(baseTime + 1500).toISOString(), authorType: 'persona', authorId: persona.id, authorName: persona.name
   }));
-  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+  app.appendRecord_(app.__definitions.ENTRIES, app.createReplyRecord_({
     postId: aiPost.postId, email: 'owner@example.com', body: 'ユーザーが参加',
     timestamp: new Date(baseTime + 2000).toISOString(), authorType: 'user', authorId: 'owner@example.com', authorName: 'owner'
   }));
-  app.appendRecord_(app.__definitions.REPLIES, app.createReplyRecord_({
+  app.appendRecord_(app.__definitions.ENTRIES, app.createReplyRecord_({
     postId: aiPost.postId, email: 'owner@example.com', body: '参加後のAI返信',
     timestamp: new Date(baseTime + 3000).toISOString(), authorType: 'persona', authorId: persona.id, authorName: persona.name
   }));

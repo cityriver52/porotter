@@ -29,7 +29,7 @@ function publishGeneratedPorotter_(email, personaId, actionContextValue, generat
     sourceLabel: generated.sourceLabel,
     sourceUrl: generated.sourceUrl
   });
-  appendRecord_(CONFIG_.SHEETS.POSTS, post);
+  appendRecord_(CONFIG_.SHEETS.ENTRIES, post);
   touchContentUpdated_();
   return {
     entryType: 'post',
@@ -42,22 +42,22 @@ function publishGeneratedPorotter_(email, personaId, actionContextValue, generat
 
 function chooseStudioActivity_(email, persona, options) {
   const only = String(options && options.only || '');
-  const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
-    .filter(function (post) { return !post.deletedAt; });
-  const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
-    .filter(function (reply) { return !reply.deletedAt; });
+  const entries = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email)
+    .filter(function (entry) { return !entry.deletedAt; });
+  const posts = entries.filter(function (entry) { return !entry.parentId; });
+  const replies = entries.filter(function (entry) { return entry.parentId; });
   const postById = posts.reduce(function (result, post) {
     result[String(post.id)] = post;
     return result;
   }, {});
   const answeredReplyIds = replies.reduce(function (result, reply) {
-    if (String(reply.authorType || 'user') === 'persona' && reply.parentReplyId) {
-      result[String(reply.parentReplyId)] = true;
+    if (String(reply.authorType || 'user') === 'persona' && reply.parentId) {
+      result[String(reply.parentId)] = true;
     }
     return result;
   }, {});
   const pendingUserReplies = replies.filter(function (reply) {
-    const post = postById[String(reply.postId)];
+    const post = postById[String(reply.rootId)];
     return post && String(post.authorType) === 'persona' &&
       String(reply.authorType || 'user') !== 'persona' &&
       !answeredReplyIds[String(reply.id)];
@@ -65,7 +65,7 @@ function chooseStudioActivity_(email, persona, options) {
 
   if (only !== 'post' && pendingUserReplies.length) {
     const targetReply = pendingUserReplies[0];
-    const targetPost = postById[String(targetReply.postId)];
+    const targetPost = postById[String(targetReply.rootId)];
     return {
       type: 'reply-to-user',
       context: { type: 'reply-to-user', postId: String(targetPost.id), parentReplyId: String(targetReply.id) },
@@ -83,7 +83,8 @@ function chooseStudioActivity_(email, persona, options) {
   const cooldownCutoff = now - (studioReplyCooldownHours_() * 60 * 60 * 1000);
   const recentlyReplied = replies.some(function (reply) {
     return String(reply.authorType || 'user') === 'persona' &&
-      !reply.parentReplyId && new Date(reply.createdAt).getTime() >= cooldownCutoff;
+      String(reply.parentId || '') === String(reply.rootId || '') &&
+      new Date(reply.createdAt).getTime() >= cooldownCutoff;
   });
   if (recentlyReplied || !posts.length) {
     if (only === 'reply') return null;
@@ -91,8 +92,8 @@ function chooseStudioActivity_(email, persona, options) {
   }
 
   const repliedPostIds = replies.reduce(function (result, reply) {
-    if (String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId) {
-      result[String(reply.postId)] = true;
+    if (String(reply.authorType || 'user') === 'persona' && String(reply.parentId || '') === String(reply.rootId || '')) {
+      result[String(reply.rootId)] = true;
     }
     return result;
   }, {});
@@ -131,7 +132,7 @@ function chooseStudioActivity_(email, persona, options) {
         author: String(post.authorName || (String(post.authorType) === 'persona' ? 'AIアカウント' : 'ユーザー')),
         body: String(post.body || ''),
         recentReplies: replies.filter(function (reply) {
-          return String(reply.postId) === String(post.id);
+          return String(reply.rootId) === String(post.id);
         }).slice(-2).map(function (reply) { return String(reply.body || ''); })
       };
     })
@@ -163,7 +164,7 @@ function studioReplyCandidateScore_(post, replies, options) {
   if (/(気づ|違和感|課題|改善|仮説|なぜ|どう|迷|振り返)/.test(body)) score += 2;
   if (tags.some(function (tag) { return openLoopTags.indexOf(tag) >= 0; })) score += 2.5;
   if (tags.some(function (tag) { return reflectionTags.indexOf(tag) >= 0; })) score += 1;
-  const replyCount = replies.filter(function (reply) { return String(reply.postId) === String(post.id); }).length;
+  const replyCount = replies.filter(function (reply) { return String(reply.rootId) === String(post.id); }).length;
   score += replyCount ? Math.max(0, 0.75 - replyCount * 0.25) : 1.5;
   const repeatedThemes = tags.filter(function (tag) {
     return context.themeCounts && Number(context.themeCounts[tag]) >= 2;
@@ -286,9 +287,9 @@ function recentPersonaPostPromptLines_(email, persona, limit) {
   const ownerEmail = normalizeEmail_(email);
   const personaId = String(persona && persona.id || '');
   if (!ownerEmail || !personaId) return [];
-  const recentPosts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), ownerEmail)
+  const recentPosts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), ownerEmail)
     .filter(function (post) {
-      return !post.deletedAt &&
+      return !post.deletedAt && !post.parentId &&
         String(post.authorType || 'user') === 'persona' &&
         (String(post.authorId || '') === personaId || String(post.authorName || '') === String(persona.name || ''));
     })
@@ -311,9 +312,9 @@ function recentPersonaSourcePromptLines_(email, persona, limit) {
   const personaId = String(persona && persona.id || '');
   if (!ownerEmail || !personaId) return [];
   const seen = {};
-  const recentSources = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), ownerEmail)
+  const recentSources = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), ownerEmail)
     .filter(function (post) {
-      return !post.deletedAt &&
+      return !post.deletedAt && !post.parentId &&
         String(post.authorType || 'user') === 'persona' &&
         (String(post.authorId || '') === personaId || String(post.authorName || '') === String(persona.name || '')) &&
         (String(post.sourceUrl || '').trim() || String(post.sourceLabel || '').trim());
@@ -347,16 +348,16 @@ function recentPersonaSourcePromptLines_(email, persona, limit) {
 }
 
 function publishStudioReplyToUser_(email, persona, context, generated) {
-  const post = ownedRecord_(CONFIG_.SHEETS.POSTS, context.postId, email);
+  const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, context.postId, email);
   assertNotDeleted_(post);
-  const parent = ownedRecord_(CONFIG_.SHEETS.REPLIES, context.parentReplyId, email);
+  const parent = ownedRecord_(CONFIG_.SHEETS.ENTRIES, context.parentReplyId, email);
   assertNotDeleted_(parent);
-  if (String(parent.postId) !== String(post.id) || String(parent.authorType || 'user') === 'persona') {
+  if (String(parent.rootId) !== String(post.id) || String(parent.authorType || 'user') === 'persona') {
     throw new Error('返信対象のユーザー返信を確認できません。');
   }
-  const alreadyAnswered = readRecords_(CONFIG_.SHEETS.REPLIES).some(function (reply) {
+  const alreadyAnswered = readRecords_(CONFIG_.SHEETS.ENTRIES).some(function (reply) {
     return !reply.deletedAt && String(reply.authorType) === 'persona' &&
-      String(reply.parentReplyId) === String(parent.id);
+      String(reply.parentId) === String(parent.id);
   });
   if (alreadyAnswered) throw new Error('このユーザー返信にはすでにAIが返信しています。');
   return publishStudioReply_(email, persona, post, parent.id, generated.body);
@@ -369,14 +370,15 @@ function publishStudioReplyChoice_(email, persona, context, generated) {
   if (!candidateIds.length) throw new Error('返信候補がありません。');
   const requestedId = String(generated.targetPostId || '');
   const targetId = candidateIds.indexOf(requestedId) >= 0 ? requestedId : candidateIds[0];
-  const post = ownedRecord_(CONFIG_.SHEETS.POSTS, targetId, email);
+  const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, targetId, email);
   assertNotDeleted_(post);
   const cooldownCutoff = Date.now() - (studioReplyCooldownHours_() * 60 * 60 * 1000);
-  const personaReplies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
+  const personaReplies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email)
     .filter(function (reply) {
-      return !reply.deletedAt && String(reply.authorType || 'user') === 'persona' && !reply.parentReplyId;
+      return !reply.deletedAt && String(reply.authorType || 'user') === 'persona' &&
+        String(reply.parentId || '') === String(reply.rootId || '');
     });
-  if (personaReplies.some(function (reply) { return String(reply.postId) === String(post.id); })) {
+  if (personaReplies.some(function (reply) { return String(reply.rootId) === String(post.id); })) {
     throw new Error('この投稿にはすでにAIが返信しています。');
   }
   if (personaReplies.some(function (reply) { return new Date(reply.createdAt).getTime() >= cooldownCutoff; })) {
@@ -390,12 +392,12 @@ function publishStudioReply_(email, persona, post, parentReplyId, body) {
     postId: post.id,
     email: email,
     body: body,
-    parentReplyId: parentReplyId,
+    parentReplyId: parentReplyId || post.id,
     authorType: 'persona',
     authorId: persona.id,
     authorName: persona.name
   });
-  appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
+  appendRecord_(CONFIG_.SHEETS.ENTRIES, reply);
   touchContentAndNotificationsUpdated_();
   return {
     entryType: 'reply',

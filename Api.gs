@@ -4,7 +4,6 @@
  */
 function apiSetupStatus() {
   try {
-    migrateLegacyProperties_();
     const email = currentUserEmail_();
     const properties = PropertiesService.getScriptProperties();
     const owner = normalizeEmail_(properties.getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL));
@@ -113,7 +112,7 @@ function apiCreatePost(payload) {
         tags: payload && payload.tags,
         sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl)
       });
-      appendRecord_(CONFIG_.SHEETS.POSTS, post);
+      appendRecord_(CONFIG_.SHEETS.ENTRIES, post);
       touchContentUpdated_();
       return presentPost_(post, 0);
   });
@@ -121,7 +120,7 @@ function apiCreatePost(payload) {
 
 function apiUpdatePost(postId, payload) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+      const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
       assertNotDeleted_(post);
       const patch = {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
@@ -129,7 +128,7 @@ function apiUpdatePost(postId, payload) {
         sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl),
         updatedAt: nowIso_()
       };
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, patch);
+      patchRecord_(CONFIG_.SHEETS.ENTRIES, post._row, patch);
       touchContentUpdated_(patch.updatedAt);
       return presentPost_(Object.assign({}, post, patch), activeReplyCount_(post.id));
   });
@@ -137,17 +136,10 @@ function apiUpdatePost(postId, payload) {
 
 function apiDeletePost(postId) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+      const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
       assertNotDeleted_(post);
       const timestamp = nowIso_();
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: timestamp });
-      readRecords_(CONFIG_.SHEETS.REPLIES)
-        .filter(function (reply) {
-          return String(reply.postId) === String(postId) && !reply.deletedAt;
-        })
-        .forEach(function (reply) {
-          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
-        });
+      markEntrySubtreeDeleted_(post.id, email, timestamp);
       touchContentUpdated_(timestamp);
       return { id: post.id, deletedAt: timestamp };
   });
@@ -155,10 +147,10 @@ function apiDeletePost(postId) {
 
 function apiToggleFavorite(postId) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+      const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
       assertNotDeleted_(post);
       const favorite = !parseBoolean_(post.favorite);
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { favorite: favorite });
+      patchRecord_(CONFIG_.SHEETS.ENTRIES, post._row, { favorite: favorite });
       touchContentUpdated_();
       return { id: post.id, favorite: favorite };
   });
@@ -166,33 +158,40 @@ function apiToggleFavorite(postId) {
 
 function apiThread(postId) {
   return runLockedApi_(function (email) {
-    const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+    const selected = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
+    assertNotDeleted_(selected);
+    const rootId = String(selected.rootId || selected.id);
+    const post = String(selected.id) === rootId ? selected : ownedRecord_(CONFIG_.SHEETS.ENTRIES, rootId, email);
     assertNotDeleted_(post);
-    markNotificationPostRead_(post.id);
-    const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
-      .filter(function (reply) {
-        return String(reply.postId) === String(postId) && !reply.deletedAt;
+    markNotificationPostRead_(rootId);
+    const entries = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email);
+    const replyCounts = countRepliesByPost_(entries, false);
+    const replies = entries
+      .filter(function (entry) {
+        return String(entry.rootId) === rootId && String(entry.id) !== rootId && !entry.deletedAt;
       })
       .sort(compareCreatedAscending_)
-      .map(presentReply_);
+      .map(function (reply) { return presentReply_(reply, replyCounts[String(reply.id)] || 0); });
     return { post: presentPost_(post, replies.length), replies: replies };
   });
 }
 
 function apiCreateReply(postId, payload) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
-      assertNotDeleted_(post);
+      const parent = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
+      assertNotDeleted_(parent);
+      const rootId = String(parent.rootId || parent.id);
       const settings = readSettings_();
       const reply = createReplyRecord_({
-        postId: post.id,
+        postId: rootId,
+        parentId: parent.id,
         email: email,
         body: payload && payload.body,
         authorType: 'user',
         authorId: email,
         authorName: String(settings.displayName || email.split('@')[0])
       });
-      appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
+      appendRecord_(CONFIG_.SHEETS.ENTRIES, reply);
       touchContentUpdated_();
       return presentReply_(reply);
   });
@@ -200,13 +199,13 @@ function apiCreateReply(postId, payload) {
 
 function apiUpdateReply(replyId, payload) {
   return runLockedApi_(function (email) {
-      const reply = ownedRecord_(CONFIG_.SHEETS.REPLIES, replyId, email);
+      const reply = ownedRecord_(CONFIG_.SHEETS.ENTRIES, replyId, email);
       assertNotDeleted_(reply);
       const patch = {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_REPLY_LENGTH, '返信'),
         updatedAt: nowIso_()
       };
-      patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, patch);
+      patchRecord_(CONFIG_.SHEETS.ENTRIES, reply._row, patch);
       touchContentUpdated_(patch.updatedAt);
       return presentReply_(Object.assign({}, reply, patch));
   });
@@ -214,10 +213,10 @@ function apiUpdateReply(replyId, payload) {
 
 function apiDeleteReply(replyId) {
   return runLockedApi_(function (email) {
-      const reply = ownedRecord_(CONFIG_.SHEETS.REPLIES, replyId, email);
+      const reply = ownedRecord_(CONFIG_.SHEETS.ENTRIES, replyId, email);
       assertNotDeleted_(reply);
       const timestamp = nowIso_();
-      patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
+      markEntrySubtreeDeleted_(reply.id, email, timestamp);
       touchContentUpdated_(timestamp);
       return { id: reply.id, deletedAt: timestamp };
   });
@@ -225,10 +224,11 @@ function apiDeleteReply(replyId) {
 
 function apiTrash() {
   return runApi_(function (email) {
-    const replyCounts = replyCountsByPost_(true, null, email);
-    const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
+    const entries = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email);
+    const replyCounts = replyCountsByPost_(true, entries, email);
+    const posts = entries
       .filter(function (post) {
-        return Boolean(post.deletedAt);
+        return !post.parentId && Boolean(post.deletedAt);
       })
       .sort(compareDeletedDescending_)
       .map(function (post) {
@@ -240,16 +240,16 @@ function apiTrash() {
 
 function apiRestorePost(postId) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+      const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
       if (!post.deletedAt) throw new Error('この投稿は削除されていません。');
       const cascadeTimestamp = String(post.deletedAt);
-      patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { deletedAt: '' });
-      readRecords_(CONFIG_.SHEETS.REPLIES)
-        .filter(function (reply) {
-          return String(reply.postId) === String(postId) && String(reply.deletedAt) === cascadeTimestamp;
+      recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email)
+        .filter(function (entry) {
+          return (String(entry.id) === String(postId) || String(entry.rootId) === String(postId)) &&
+            String(entry.deletedAt) === cascadeTimestamp;
         })
-        .forEach(function (reply) {
-          patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: '' });
+        .forEach(function (entry) {
+          patchRecord_(CONFIG_.SHEETS.ENTRIES, entry._row, { deletedAt: '' });
         });
       touchContentUpdated_();
       return { id: post.id };
@@ -258,14 +258,13 @@ function apiRestorePost(postId) {
 
 function apiPermanentlyDeletePost(postId) {
   return runLockedApi_(function (email) {
-      const post = ownedRecord_(CONFIG_.SHEETS.POSTS, postId, email);
+      const post = ownedRecord_(CONFIG_.SHEETS.ENTRIES, postId, email);
       if (!post.deletedAt) throw new Error('ごみ箱にある投稿だけを完全に削除できます。');
 
-      readRecords_(CONFIG_.SHEETS.REPLIES)
-        .filter(function (reply) { return String(reply.postId) === String(postId); })
+      recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email)
+        .filter(function (entry) { return String(entry.id) === String(postId) || String(entry.rootId) === String(postId); })
         .sort(function (a, b) { return b._row - a._row; })
-        .forEach(function (reply) { deleteRecordRow_(CONFIG_.SHEETS.REPLIES, reply._row); });
-      deleteRecordRow_(CONFIG_.SHEETS.POSTS, post._row);
+        .forEach(function (entry) { deleteRecordRow_(CONFIG_.SHEETS.ENTRIES, entry._row); });
       touchContentUpdated_();
       return { id: post.id };
   });
@@ -416,4 +415,27 @@ function runLockedApi_(callback) {
       return callback(email);
     });
   });
+}
+
+function markEntrySubtreeDeleted_(entryId, email, timestamp) {
+  const entries = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.ENTRIES), email);
+  const targetIds = {};
+  targetIds[String(entryId)] = true;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    entries.forEach(function (entry) {
+      const id = String(entry.id);
+      if (targetIds[id]) return;
+      if (targetIds[String(entry.parentId || '')]) {
+        targetIds[id] = true;
+        changed = true;
+      }
+    });
+  }
+  entries
+    .filter(function (entry) { return targetIds[String(entry.id)] && !entry.deletedAt; })
+    .forEach(function (entry) {
+      patchRecord_(CONFIG_.SHEETS.ENTRIES, entry._row, { deletedAt: timestamp });
+    });
 }

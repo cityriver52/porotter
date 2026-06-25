@@ -3,9 +3,11 @@
  */
 
 function createReadSnapshot_() {
+  const entries = readRecords_(CONFIG_.SHEETS.ENTRIES);
   return {
-    posts: readRecords_(CONFIG_.SHEETS.POSTS),
-    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
+    entries: entries,
+    posts: entries.filter(function (entry) { return !entry.parentId; }),
+    replies: entries.filter(function (entry) { return entry.parentId; }),
     settings: readSettings_(),
     personas: readRecords_(CONFIG_.SHEETS.PERSONAS)
   };

@@ -40,10 +40,6 @@ function preparePorotterAiRequest() {
   });
 }
 
-function preparePorterAiRequest() {
-  return preparePorotterAiRequest();
-}
-
 function createPorotterAiRequest_(email, options) {
     const requestOptions = options || {};
     const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
@@ -197,10 +193,6 @@ function processPorotterAiResponses() {
   });
 }
 
-function processPorterAiResponses() {
-  return processPorotterAiResponses();
-}
-
 function installPorotterAiAutomation() {
   const email = automationOwnerEmail_();
   ensureSchema_(getSpreadsheet_());
@@ -238,8 +230,6 @@ function checkPorotterAiAutomation() {
 function buildAiAutomationStatus_(email, requestRecords) {
   ensureSchema_(getSpreadsheet_());
   const handlers = porotterAiTriggerHandlers_();
-  const legacyHandlers = legacyPorotterAiTriggerHandlers_();
-  const managedHandlers = managedPorotterAiTriggerHandlers_();
   const installedHandlers = ScriptApp.getProjectTriggers().map(function (trigger) {
     return trigger.getHandlerFunction();
   });
@@ -253,13 +243,10 @@ function buildAiAutomationStatus_(email, requestRecords) {
   const currentInstalled = handlers.every(function (handler) {
     return installedHandlers.indexOf(handler) >= 0;
   });
-  const legacyInstalled = legacyHandlers.every(function (handler) {
-    return installedHandlers.indexOf(handler) >= 0;
-  });
   return {
-    installed: currentInstalled || legacyInstalled,
+    installed: currentInstalled,
     ownerEmail: email,
-    triggerHandlers: installedHandlers.filter(function (handler) { return managedHandlers.indexOf(handler) >= 0; }),
+    triggerHandlers: installedHandlers.filter(function (handler) { return handlers.indexOf(handler) >= 0; }),
     requestCounts: counts,
     recentRequests: requests.sort(compareCreatedDescending_).slice(0, 10).map(function (request) {
       return {
@@ -279,7 +266,6 @@ function buildAiAutomationStatus_(email, requestRecords) {
 }
 
 function automationOwnerEmail_() {
-  migrateLegacyProperties_();
   const allowedEmail = normalizeEmail_(
     PropertiesService.getScriptProperties().getProperty(CONFIG_.PROPERTY_ALLOWED_EMAIL)
   );
@@ -313,16 +299,8 @@ function porotterAiTriggerHandlers_() {
   return ['preparePorotterAiRequest', 'processPorotterAiResponses'];
 }
 
-function legacyPorotterAiTriggerHandlers_() {
-  return ['preparePorterAiRequest', 'processPorterAiResponses'];
-}
-
-function managedPorotterAiTriggerHandlers_() {
-  return porotterAiTriggerHandlers_().concat(legacyPorotterAiTriggerHandlers_());
-}
-
 function removePorotterAiTriggers_() {
-  const handlers = managedPorotterAiTriggerHandlers_();
+  const handlers = porotterAiTriggerHandlers_();
   let deletedCount = 0;
   ScriptApp.getProjectTriggers().forEach(function (trigger) {
     if (handlers.indexOf(trigger.getHandlerFunction()) >= 0) {
