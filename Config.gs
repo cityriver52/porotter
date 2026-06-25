@@ -22,8 +22,7 @@ const CONFIG_ = Object.freeze({
   STUDIO_REPLY_MAX_POST_AGE_DAYS: 45,
   AI_REQUEST_STALE_HOURS: 48,
   AI_REQUEST_PROCESS_LIMIT: 5,
-  DEFAULT_AI_POST_INTERVAL_HOURS: 6,
-  DEFAULT_AI_REPLY_INTERVAL_HOURS: 20,
+  DEFAULT_AI_AUTOMATION_INTERVAL_HOURS: 6,
   AI_INTERVAL_MINUTES: Object.freeze([0, 10, 20, 30, 40, 50, 60, 120, 180, 360, 720, 1200, 1440, 2880, 4320, 10080]),
   AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 20 / 60, 30 / 60, 40 / 60, 50 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
   PERSONA_AVATAR_COLORS: Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']),
@@ -203,6 +202,13 @@ function normalizeAiIntervalHours_(value, fallback) {
   return 0;
 }
 
+function normalizeAiAutomationIntervalHours_(settings) {
+  const source = settings && settings.aiAutomationIntervalHours !== undefined
+    ? settings.aiAutomationIntervalHours
+    : CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS;
+  return normalizeAiIntervalHours_(source, CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS);
+}
+
 function aiIntervalHoursToMinutes_(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
@@ -215,12 +221,6 @@ function aiIntervalMinutesToHours_(minutes) {
 
 function aiIntervalHoursToMs_(value) {
   return aiIntervalHoursToMinutes_(value) * 60 * 1000;
-}
-
-function aiIntervalHoursToMs_(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.round(parsed * 60 * 60 * 1000);
 }
 
 function isValidDateInput_(value) {

@@ -210,20 +210,10 @@
             </div>
             <div class="settings-section">
               <h2>AIの投稿頻度</h2>
-              <p>自動投稿と自動返信を別々に設定します。手動投稿はこの設定に関係なく実行できます。</p>
-              <label>AIの新規投稿
-                <select id="ai-post-frequency-input">
-                  <option value="0">自動投稿しない</option><option value="0.16666666666666666">10分ごと</option><option value="0.3333333333333333">20分ごと</option>
-                  <option value="0.5">30分ごと</option><option value="0.6666666666666666">40分ごと</option><option value="0.8333333333333334">50分ごと</option>
-                  <option value="1">1時間ごと</option><option value="2">2時間ごと</option>
-                  <option value="3">3時間ごと</option><option value="6">6時間ごと</option><option value="12">12時間ごと</option>
-                  <option value="20">20時間ごと</option><option value="24">1日ごと</option><option value="48">2日ごと</option>
-                  <option value="72">3日ごと</option><option value="168">1週間ごと</option>
-                </select>
-              </label>
-              <label>AIの返信
-                <select id="ai-reply-frequency-input">
-                  <option value="0">自動返信しない</option><option value="0.16666666666666666">10分ごと</option><option value="0.3333333333333333">20分ごと</option>
+              <p>設定した頻度でAIが動き、返信すべき投稿があれば返信を、なければ新規投稿を作成します。</p>
+              <label>AIの実行頻度
+                <select id="ai-frequency-input">
+                  <option value="0">自動実行しない</option><option value="0.16666666666666666">10分ごと</option><option value="0.3333333333333333">20分ごと</option>
                   <option value="0.5">30分ごと</option><option value="0.6666666666666666">40分ごと</option><option value="0.8333333333333334">50分ごと</option>
                   <option value="1">1時間ごと</option><option value="2">2時間ごと</option>
                   <option value="3">3時間ごと</option><option value="6">6時間ごと</option><option value="12">12時間ごと</option>
@@ -253,13 +243,12 @@
             </div>
           </section>
 
-          <section class="settings-card export-card">
+          <section class="settings-card data-card">
             <div class="settings-section">
-              <h2>データを書き出す</h2>
-              <p>投稿と返信のバックアップを端末に保存します。ごみ箱のデータも含まれます。</p>
+              <h2>データ保存先</h2>
+              <p>投稿、返信、AIRequestsは専用のGoogleスプレッドシートに保存されています。</p>
               <div class="button-row">
-                <button class="secondary-button" type="button" data-export="json">JSONで保存</button>
-                <button class="secondary-button" type="button" data-export="csv">投稿をCSVで保存</button>
+                <a id="data-spreadsheet-link" class="secondary-button" href="#" target="_blank" rel="noopener">元データのスプレッドシートを開く</a>
               </div>
             </div>
           </section>

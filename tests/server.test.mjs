@@ -23,7 +23,7 @@ test('the standalone web app can complete first-time setup safely', () => {
   assert.equal(app.apiSetupPorotter().ok, false);
 });
 
-test('setup, CRUD, replies, trash, search and export work as one flow', () => {
+test('setup, CRUD, replies, trash and search work as one flow', () => {
   const app = createContext();
   const setup = app.setupPorotter();
   assert.equal(setup.allowedEmail, 'owner@example.com');
@@ -62,11 +62,7 @@ test('setup, CRUD, replies, trash, search and export work as one flow', () => {
   assert.equal(app.apiRestorePost(first.data.id).ok, true);
   assert.equal(app.apiThread(first.data.id).data.replies.length, 1);
 
-  const jsonExport = app.apiExport('json');
-  assert.equal(jsonExport.ok, true);
-  assert.match(jsonExport.data.content, /更新した本文/);
-  const csvExport = app.apiExport('csv');
-  assert.match(csvExport.data.content, /"'=SUM\(A1:A2\)"/);
+  assert.equal(app.apiTimeline({}).data.total, 2);
 });
 
 test('validation and authorization are enforced on the server', () => {
@@ -175,12 +171,16 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.equal(queued.status, 'REQUESTED');
   assert.equal(queued.personaId, saved.data.id);
   const generationPrompt = queued.generationPrompt;
-  assert.match(generationPrompt, /過去7日/);
-  assert.match(generationPrompt, /Google Drive/);
-  assert.match(generationPrompt, /Gmail/);
-  assert.match(generationPrompt, /Google Chat/);
-  assert.match(generationPrompt, /フォローしていないスレッドへの返信を必ず無視/);
-  assert.match(generationPrompt, /フォロー状態を確認できない返信も対象外/);
+  assert.match(generationPrompt, /このAIRequests行の個別指示/);
+  assert.match(generationPrompt, /疑似アカウント名: 経理の見張り番/);
+  assert.doesNotMatch(generationPrompt, /Google Workspaceの次の情報/);
+  const commonPrompt = app.workspaceStudioCommonPrompt_();
+  assert.match(commonPrompt, /過去7日/);
+  assert.match(commonPrompt, /Google Drive/);
+  assert.match(commonPrompt, /Gmail/);
+  assert.match(commonPrompt, /Google Chat/);
+  assert.match(commonPrompt, /フォローしていないスレッドへの返信を必ず無視/);
+  assert.match(commonPrompt, /フォロー状態を確認できない返信も対象外/);
 
   app.patchRecord_(app.__definitions.AI_REQUESTS, queued._row, {
     status: 'GENERATED',
@@ -219,8 +219,7 @@ test('REQUESTED queue rows do not block later AI request creation', () => {
     displayName: 'owner',
     theme: 'system',
     pageSize: 20,
-    aiPostIntervalHours: 1,
-    aiReplyIntervalHours: 0
+    aiAutomationIntervalHours: 1
   });
 
   const first = app.apiRequestAiPost(persona.id).data;
@@ -290,7 +289,7 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
   assert.ok(!replyActivity.context.candidatePostIds.includes(second.id));
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
   assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
-  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /Google Chat/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /Google Chat/);
   const newPostPrompt = app.buildPersonaGenerationPrompt_(persona, { type: 'post' });
   assert.match(newPostPrompt, /自分のためにつぶやく独り言/);
   assert.match(newPostPrompt, /上限まで文字数を埋めない/);
@@ -375,7 +374,7 @@ test('notifications cover user posts and AI posts where the user joined the thre
   assert.equal(app.apiMarkNotificationsRead().data.unreadCount, 0);
 });
 
-test('AI post and reply intervals are configurable and manual posts bypass the schedule', () => {
+test('AI automation interval is configurable and manual posts bypass the schedule', () => {
   const app = createContext();
   app.setupPorotter();
   const persona = app.apiSavePersona('', {
@@ -386,19 +385,17 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   }).data;
   const settings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 1, aiReplyIntervalHours: 0
+    aiAutomationIntervalHours: 1
   }).data;
-  assert.equal(settings.aiPostIntervalHours, 1);
-  assert.equal(settings.aiReplyIntervalHours, 0);
+  assert.equal(settings.aiAutomationIntervalHours, 1);
   const minuteSettings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 20 / 60, aiReplyIntervalHours: 50 / 60
+    aiAutomationIntervalHours: 20 / 60
   }).data;
-  assert.equal(minuteSettings.aiPostIntervalHours, 20 / 60);
-  assert.equal(minuteSettings.aiReplyIntervalHours, 50 / 60);
+  assert.equal(minuteSettings.aiAutomationIntervalHours, 20 / 60);
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 1, aiReplyIntervalHours: 0
+    aiAutomationIntervalHours: 1
   });
 
   const scheduled = app.preparePorotterAiRequest();
@@ -410,7 +407,7 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
 
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 0, aiReplyIntervalHours: 0
+    aiAutomationIntervalHours: 0
   });
   const manual = app.apiRequestAiPost(persona.id).data;
   assert.equal(manual.created, true);
@@ -427,13 +424,16 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
   replyApp.apiCreateReply(aiPost.postId, { body: 'seed reply' });
   replyApp.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiPostIntervalHours: 0, aiReplyIntervalHours: 2
+    aiAutomationIntervalHours: 2
   });
   const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
   assert.equal(forcedPost.actionType, '新規投稿');
   const forcedPostRow = replyApp.findRecordById_(replyApp.__definitions.AI_REQUESTS, forcedPost.requestId);
   assert.equal(JSON.parse(forcedPostRow.actionContext).type, 'post');
-  replyApp.patchRecord_(replyApp.__definitions.AI_REQUESTS, forcedPostRow._row, { status: 'ERROR' });
+  replyApp.patchRecord_(replyApp.__definitions.AI_REQUESTS, forcedPostRow._row, {
+    status: 'ERROR',
+    createdAt: new Date(Date.now() - (3 * 60 * 60 * 1000)).toISOString()
+  });
   const scheduledReply = replyApp.preparePorotterAiRequest();
   assert.equal(scheduledReply.created, true);
   assert.equal(scheduledReply.actionType, '返信');
@@ -450,14 +450,13 @@ test('AI post and reply intervals are configurable and manual posts bypass the s
     displayName: 'owner',
     theme: 'system',
     pageSize: 20,
-    aiPostIntervalHours: 10 / 60,
-    aiReplyIntervalHours: 10 / 60
+    aiAutomationIntervalHours: 10 / 60
   });
   const fallbackRequest = fallbackApp.preparePorotterAiRequest();
   assert.equal(fallbackRequest.created, true);
-  assert.equal(fallbackRequest.actionType, '返信');
+  assert.equal(fallbackRequest.actionType, '新規投稿');
   const fallbackRow = fallbackApp.findRecordById_(fallbackApp.__definitions.AI_REQUESTS, fallbackRequest.requestId);
-  assert.equal(fallbackRow.actionType, '返信');
+  assert.equal(fallbackRow.actionType, '新規投稿');
   assert.equal(JSON.parse(fallbackRow.actionContext).type, 'post');
 });
 
@@ -483,8 +482,8 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   assert.equal(priorityActivity.context.parentReplyId, userReply.id);
   const priorityPrompt = app.buildPersonaGenerationPrompt_(persona, priorityActivity);
   assert.match(priorityPrompt, /ユーザーから届いた返信/);
-  assert.match(priorityPrompt, /Gmail/);
-  assert.match(priorityPrompt, /フォロー状態を確認できない返信も対象外/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /Gmail/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /フォロー状態を確認できない返信も対象外/);
 
   app.publishGeneratedPorotter_('owner@example.com', persona.id, priorityActivity.context, JSON.stringify({
     body: 'まず「今日中に自分で進めること」と「誰かに聞くこと」を分ける案内があると、最初の10分で立ち止まりにくくなります。'

@@ -275,20 +275,15 @@ function apiSaveSettings(payload) {
         ? payload.theme
         : 'system';
       const pageSize = clampInteger_(payload && payload.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
-      const aiPostIntervalHours = normalizeAiIntervalHours_(
-        payload && payload.aiPostIntervalHours,
-        CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS
-      );
-      const aiReplyIntervalHours = normalizeAiIntervalHours_(
-        payload && payload.aiReplyIntervalHours,
-        CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
+      const aiAutomationIntervalHours = normalizeAiIntervalHours_(
+        payload && payload.aiAutomationIntervalHours,
+        CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS
       );
       const updates = {
         displayName: displayName,
         theme: theme,
         pageSize: String(pageSize),
-        aiPostIntervalHours: String(aiPostIntervalHours),
-        aiReplyIntervalHours: String(aiReplyIntervalHours)
+        aiAutomationIntervalHours: String(aiAutomationIntervalHours)
       };
       writeSettings_(updates);
       return publicSettings_(Object.assign({}, readSettings_(), updates), email);
@@ -343,31 +338,6 @@ function apiProcessAiResponses() {
 function apiDiscovery() {
   return runApi_(function () {
     return buildDiscovery_();
-  });
-}
-
-function apiExport(format) {
-  return runApi_(function (email) {
-    const normalizedFormat = String(format || 'json').toLowerCase();
-    const posts = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.POSTS), email)
-      .map(function (post) { return exportRecord_(post); });
-    const replies = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.REPLIES), email)
-      .map(function (reply) { return exportRecord_(reply); });
-
-    if (normalizedFormat === 'csv') {
-      return {
-        format: 'csv',
-        filename: 'porotter-posts-' + localDateKey_() + '.csv',
-        mimeType: 'text/csv;charset=utf-8',
-        content: recordsToCsv_(posts, CONFIG_.SHEETS.POSTS.headers)
-      };
-    }
-    return {
-      format: 'json',
-      filename: 'porotter-backup-' + localDateKey_() + '.json',
-      mimeType: 'application/json;charset=utf-8',
-      content: JSON.stringify({ exportedAt: nowIso_(), posts: posts, replies: replies }, null, 2)
-    };
   });
 }
 
@@ -652,13 +622,14 @@ function presentReply_(record) {
 }
 
 function publicSettings_(settings, email) {
+  const aiAutomationIntervalHours = normalizeAiAutomationIntervalHours_(settings);
   return {
     displayName: String(settings.displayName || email.split('@')[0]),
     email: email,
+    spreadsheetUrl: getSpreadsheet_().getUrl(),
     theme: ['system', 'light', 'dark'].indexOf(settings.theme) >= 0 ? settings.theme : 'system',
     pageSize: clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE),
-    aiPostIntervalHours: normalizeAiIntervalHours_(settings.aiPostIntervalHours, CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS),
-    aiReplyIntervalHours: normalizeAiIntervalHours_(settings.aiReplyIntervalHours, CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS),
+    aiAutomationIntervalHours: aiAutomationIntervalHours,
     maxPostLength: CONFIG_.MAX_POST_LENGTH,
     maxReplyLength: CONFIG_.MAX_REPLY_LENGTH,
     maxTags: CONFIG_.MAX_TAGS,
@@ -718,24 +689,3 @@ function localDateKey_(value) {
   return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
-function exportRecord_(record) {
-  const copy = {};
-  Object.keys(record).forEach(function (key) {
-    if (key !== '_row') copy[key] = record[key];
-  });
-  if (copy.tags) copy.tags = parseTags_(copy.tags);
-  return copy;
-}
-
-function recordsToCsv_(records, headers) {
-  const safeCell = function (value) {
-    let text = Array.isArray(value) ? value.join(' ') : String(value == null ? '' : value);
-    if (/^[=+\-@]/.test(text)) text = "'" + text;
-    return '"' + text.replace(/"/g, '""') + '"';
-  };
-  const lines = [headers.map(safeCell).join(',')];
-  records.forEach(function (record) {
-    lines.push(headers.map(function (header) { return safeCell(record[header]); }).join(','));
-  });
-  return '\uFEFF' + lines.join('\r\n');
-}

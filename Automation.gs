@@ -20,44 +20,22 @@ function preparePorotterAiRequest() {
     const persona = personas[Math.floor(Math.random() * personas.length)];
     const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
     const settings = readSettings_();
-    const replyInterval = normalizeAiIntervalHours_(
-      settings.aiReplyIntervalHours,
-      CONFIG_.DEFAULT_AI_REPLY_INTERVAL_HOURS
-    );
-    const postInterval = normalizeAiIntervalHours_(
-      settings.aiPostIntervalHours,
-      CONFIG_.DEFAULT_AI_POST_INTERVAL_HOURS
-    );
-    let activity = null;
-    let requestActionType = '';
-    if (aiRequestDue_(requests, '返信', replyInterval)) {
-      activity = chooseStudioActivity_(email, persona, { only: 'reply' });
-      if (activity) {
-        requestActionType = '返信';
-      } else {
-        activity = chooseStudioActivity_(email, persona, { only: 'post' });
-        if (activity) {
-          requestActionType = '返信';
-          activity.targetSummary = activity.targetSummary || '返信対象がないため新規投稿';
-          activity.context = Object.assign({}, activity.context || {}, { fallbackFrom: 'reply' });
-        }
-      }
-    }
-    if (!activity && aiRequestDue_(requests, '新規投稿', postInterval)) {
-      activity = chooseStudioActivity_(email, persona, { only: 'post' });
-      if (activity) requestActionType = '新規投稿';
-    }
+    const automationInterval = normalizeAiAutomationIntervalHours_(settings);
+    const selected = aiAutomationRequestDue_(requests, automationInterval)
+      ? chooseAiAutomationActivity_(email, persona)
+      : null;
+    const activity = selected && selected.activity;
     if (!activity) {
       return {
         created: false,
-        reason: '設定した頻度に達していないか、返信に適した投稿がありません。',
+        reason: '設定した頻度に達していません。',
         pendingCount: pendingAiRequestCount_(requests)
       };
     }
     return createPorotterAiRequest_(email, {
       persona: persona,
       activity: activity,
-      actionType: requestActionType
+      actionType: selected.actionType
     });
   });
 }
@@ -142,15 +120,25 @@ function pendingAiRequestCount_(requests) {
   }).length;
 }
 
-function aiRequestDue_(requests, actionType, intervalHours) {
+function aiAutomationRequestDue_(requests, intervalHours) {
   const intervalMs = aiIntervalHoursToMs_(intervalHours);
   if (!intervalMs) return false;
   const latest = (requests || [])
-    .filter(function (request) { return String(request.actionType) === actionType; })
     .map(function (request) { return new Date(request.createdAt).getTime(); })
     .filter(Number.isFinite)
     .sort(function (a, b) { return b - a; })[0];
   return !latest || Date.now() - latest >= intervalMs;
+}
+
+function chooseAiAutomationActivity_(email, persona) {
+  const replyActivity = chooseStudioActivity_(email, persona, { only: 'reply' });
+  if (replyActivity) return { activity: replyActivity, actionType: '返信' };
+
+  const postActivity = chooseStudioActivity_(email, persona, { only: 'post' });
+  if (!postActivity) return null;
+  postActivity.targetSummary = postActivity.targetSummary || '返信対象がないため新規投稿';
+  postActivity.context = Object.assign({}, postActivity.context || {}, { fallbackFrom: 'reply' });
+  return { activity: postActivity, actionType: '新規投稿' };
 }
 
 function processPorotterAiResponses() {

@@ -14,7 +14,7 @@
     { id: 'r4', postId: 'p2', parentReplyId: '', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), authorType: 'user', authorName: 'わたし' },
     { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人' }
   ];
-  let settings = { displayName: 'わたし', email: 'me@example.com', theme: 'system', pageSize: 20, aiPostIntervalHours: 6, aiReplyIntervalHours: 20, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
+  let settings = { displayName: 'わたし', email: 'me@example.com', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/preview', theme: 'system', pageSize: 20, aiAutomationIntervalHours: 6, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
     { id: 'persona-1', name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人', prompt: '曖昧な表現や小さな抜けを丁寧に見つけます。', enabled: true, avatarColor: 'teal', createdAt: iso(2), updatedAt: iso(2) }
   ];
@@ -120,8 +120,7 @@
     },
     apiTogglePersona: id => { const persona = personas.find(item => item.id === id); persona.enabled = !persona.enabled; return persona; },
     apiDeletePersona: id => { personas = personas.filter(item => item.id !== id); return { id }; },
-    apiDiscovery: () => discovery(),
-    apiExport: format => ({ format, filename: `porotter-preview.${format}`, mimeType: format === 'json' ? 'application/json' : 'text/csv', content: format === 'json' ? JSON.stringify({ posts, replies, personas }, null, 2) : 'body\npreview' })
+    apiDiscovery: () => discovery()
   };
 
   let successHandler = () => {};
