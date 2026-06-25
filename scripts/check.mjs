@@ -42,6 +42,10 @@ try {
 }
 
 const index = fs.readFileSync(path.join(root, 'Index.html'), 'utf8');
+const codeFile = fs.readFileSync(path.join(root, 'Code.gs'), 'utf8');
+if (!codeFile.includes('createTemplateFromFile(filename).getRawContent()')) {
+  errors.push('Code.gs: include_ must use getRawContent() so JavaScript partials are not parsed as standalone HTML');
+}
 for (const partial of ['Styles'].concat(clientPartials)) {
   if (!index.includes(`include_('${partial}')`)) errors.push(`Index.html: ${partial} partial is not included`);
 }

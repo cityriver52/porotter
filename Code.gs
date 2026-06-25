@@ -9,7 +9,7 @@ function doGet() {
 }
 
 function include_(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+  return HtmlService.createTemplateFromFile(filename).getRawContent();
 }
 
 /**
