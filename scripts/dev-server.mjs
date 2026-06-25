@@ -5,15 +5,20 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.PORT || 4173);
+const clientPartials = [
+  'ClientState', 'ClientCore', 'ClientComposer', 'ClientTimeline', 'ClientThread',
+  'ClientViews', 'ClientSyncNotifications', 'ClientPersonasAiSettings', 'ClientDialogsUtils'
+];
 
 function buildPage() {
   const index = fs.readFileSync(path.join(root, 'Index.html'), 'utf8');
   const styles = fs.readFileSync(path.join(root, 'Styles.html'), 'utf8');
-  const client = fs.readFileSync(path.join(root, 'JavaScript.html'), 'utf8');
   const mockApi = fs.readFileSync(path.join(root, 'dev', 'preview-api.js'), 'utf8');
-  return index
-    .replace("<?!= include_('Styles'); ?>", styles)
-    .replace("<?!= include_('JavaScript'); ?>", `<script>${mockApi}</script>\n${client}`);
+  return clientPartials.reduce(
+    (html, partial) => html.replace(`<?!= include_('${partial}'); ?>`, fs.readFileSync(path.join(root, `${partial}.html`), 'utf8')),
+    index.replace("<?!= include_('Styles'); ?>", styles)
+      .replace('    <script>\n      \'use strict\';', `    <script>${mockApi}</script>\n    <script>\n      'use strict';`)
+  );
 }
 
 const server = http.createServer((request, response) => {

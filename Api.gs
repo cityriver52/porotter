@@ -39,13 +39,15 @@ function apiBootstrap(filters) {
     ensureSchema_(getSpreadsheet_());
     ensureDefaultSettings_(email);
     const snapshot = createReadSnapshot_();
+    const aiRequests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
     return {
       timeline: buildTimeline_(filters || {}, snapshot),
       settings: publicSettings_(snapshot.settings, email),
       discovery: buildDiscovery_(snapshot),
       personas: listPersonas_(email, snapshot.personas),
       notifications: buildNotifications_(email, snapshot),
-      aiAutomation: publicAiAutomationStatus_(buildAiAutomationStatus_(email))
+      aiAutomation: publicAiAutomationStatus_(buildAiAutomationStatus_(email, aiRequests)),
+      sync: buildSyncState_(snapshot.settings, aiRequests)
     };
   });
 }
@@ -53,6 +55,53 @@ function apiBootstrap(filters) {
 function apiTimeline(filters) {
   return runApi_(function () {
     return buildTimeline_(filters || {});
+  });
+}
+
+function apiSync(payload) {
+  return runApi_(function (email) {
+    const options = payload || {};
+    ensureSchema_(getSpreadsheet_());
+    ensureDefaultSettings_(email);
+
+    let aiProcessResult = null;
+    let aiProcessError = '';
+    if (options.processAiResponses !== false) {
+      try {
+        aiProcessResult = processPorotterAiResponses();
+      } catch (error) {
+        aiProcessError = String(error && error.message || 'AI生成結果の確認に失敗しました。');
+      }
+    }
+
+    const settings = readSettings_();
+    const aiRequests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
+    const sync = buildSyncState_(settings, aiRequests);
+    const clientSync = normalizeClientSyncCursor_(options.sync || {});
+    const contentChanged = cursorChanged_(clientSync.contentCursor, sync.contentCursor);
+    const notificationsChanged = contentChanged || cursorChanged_(clientSync.notificationsCursor, sync.notificationsCursor);
+    const aiChanged = cursorChanged_(clientSync.aiCursor, sync.aiCursor);
+    let snapshot = null;
+    const response = {
+      changed: contentChanged || notificationsChanged || aiChanged,
+      contentChanged: contentChanged,
+      notificationsChanged: notificationsChanged,
+      aiChanged: aiChanged,
+      sync: sync,
+      aiAutomation: publicAiAutomationStatus_(buildAiAutomationStatus_(email, aiRequests)),
+      aiProcessResult: aiProcessResult,
+      aiProcessError: aiProcessError
+    };
+
+    if (contentChanged && options.includeTimeline !== false) {
+      snapshot = createReadSnapshot_();
+      response.timeline = buildTimeline_(options.filters || {}, snapshot);
+    }
+    if (notificationsChanged || options.includeNotifications === true) {
+      snapshot = snapshot || createNotificationSnapshot_();
+      response.notifications = buildNotifications_(email, snapshot);
+    }
+    return response;
   });
 }
 
@@ -65,6 +114,7 @@ function apiCreatePost(payload) {
         sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl)
       });
       appendRecord_(CONFIG_.SHEETS.POSTS, post);
+      touchContentUpdated_();
       return presentPost_(post, 0);
   });
 }
@@ -80,6 +130,7 @@ function apiUpdatePost(postId, payload) {
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, patch);
+      touchContentUpdated_(patch.updatedAt);
       return presentPost_(Object.assign({}, post, patch), activeReplyCount_(post.id));
   });
 }
@@ -97,6 +148,7 @@ function apiDeletePost(postId) {
         .forEach(function (reply) {
           patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
         });
+      touchContentUpdated_(timestamp);
       return { id: post.id, deletedAt: timestamp };
   });
 }
@@ -107,6 +159,7 @@ function apiToggleFavorite(postId) {
       assertNotDeleted_(post);
       const favorite = !parseBoolean_(post.favorite);
       patchRecord_(CONFIG_.SHEETS.POSTS, post._row, { favorite: favorite });
+      touchContentUpdated_();
       return { id: post.id, favorite: favorite };
   });
 }
@@ -140,6 +193,7 @@ function apiCreateReply(postId, payload) {
         authorName: String(settings.displayName || email.split('@')[0])
       });
       appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
+      touchContentUpdated_();
       return presentReply_(reply);
   });
 }
@@ -153,6 +207,7 @@ function apiUpdateReply(replyId, payload) {
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, patch);
+      touchContentUpdated_(patch.updatedAt);
       return presentReply_(Object.assign({}, reply, patch));
   });
 }
@@ -163,6 +218,7 @@ function apiDeleteReply(replyId) {
       assertNotDeleted_(reply);
       const timestamp = nowIso_();
       patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: timestamp });
+      touchContentUpdated_(timestamp);
       return { id: reply.id, deletedAt: timestamp };
   });
 }
@@ -195,6 +251,7 @@ function apiRestorePost(postId) {
         .forEach(function (reply) {
           patchRecord_(CONFIG_.SHEETS.REPLIES, reply._row, { deletedAt: '' });
         });
+      touchContentUpdated_();
       return { id: post.id };
   });
 }
@@ -209,6 +266,7 @@ function apiPermanentlyDeletePost(postId) {
         .sort(function (a, b) { return b._row - a._row; })
         .forEach(function (reply) { deleteRecordRow_(CONFIG_.SHEETS.REPLIES, reply._row); });
       deleteRecordRow_(CONFIG_.SHEETS.POSTS, post._row);
+      touchContentUpdated_();
       return { id: post.id };
   });
 }
@@ -298,7 +356,8 @@ function apiNotifications() {
 
 function apiMarkNotificationsRead() {
   return runLockedApi_(function (email) {
-    writeSettings_({ notificationsReadAt: nowIso_() });
+    const timestamp = nowIso_();
+    writeSettings_({ notificationsReadAt: timestamp, notificationsUpdatedAt: timestamp });
     return buildNotifications_(email, createNotificationSnapshot_());
   });
 }
@@ -358,334 +417,3 @@ function runLockedApi_(callback) {
     });
   });
 }
-
-function createReadSnapshot_() {
-  return {
-    posts: readRecords_(CONFIG_.SHEETS.POSTS),
-    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
-    settings: readSettings_(),
-    personas: readRecords_(CONFIG_.SHEETS.PERSONAS)
-  };
-}
-
-function buildTimeline_(rawFilters, snapshot) {
-  const filters = rawFilters || {};
-  const email = currentUserEmail_();
-  const allReplies = snapshot && snapshot.replies || readRecords_(CONFIG_.SHEETS.REPLIES);
-  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
-  const activeReplies = recordsOwnedBy_(allReplies, email).filter(function (reply) {
-    return !reply.deletedAt;
-  });
-  const replyCounts = countRepliesByPost_(activeReplies, true);
-
-  const activePosts = recordsOwnedBy_(allPosts, email).filter(function (post) {
-    return !post.deletedAt;
-  });
-  let posts = activePosts.slice();
-
-  const query = String(filters.query || '').trim().toLocaleLowerCase();
-  const tag = String(filters.tag || '').replace(/^#/, '').trim().toLocaleLowerCase();
-  const startDate = isValidDateInput_(filters.startDate) ? String(filters.startDate) : '';
-  const endDate = isValidDateInput_(filters.endDate) ? String(filters.endDate) : '';
-
-  posts = posts.filter(function (post) {
-    const tags = parseTags_(post.tags);
-    const searchable = (String(post.body) + ' ' + tags.join(' ') + ' ' + String(post.authorName || '')).toLocaleLowerCase();
-    const createdDate = localDateKey_(post.createdAt);
-    if (query && searchable.indexOf(query) < 0) return false;
-    if (tag && !tags.some(function (item) { return item.toLocaleLowerCase() === tag; })) return false;
-    if (parseBoolean_(filters.favoriteOnly) && !parseBoolean_(post.favorite)) return false;
-    if (filters.authorType === 'user' && String(post.authorType || 'user') === 'persona') return false;
-    if (filters.replyState === 'with' && !(replyCounts[String(post.id)] > 0)) return false;
-    if (filters.replyState === 'without' && replyCounts[String(post.id)] > 0) return false;
-    if (startDate && createdDate < startDate) return false;
-    if (endDate && createdDate > endDate) return false;
-    return true;
-  });
-
-  posts.sort(compareCreatedDescending_);
-  const total = posts.length;
-  const offset = clampInteger_(filters.offset, 0, 0, Math.max(0, total));
-  const settings = snapshot && snapshot.settings || readSettings_();
-  const configuredPageSize = clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
-  const pageSize = clampInteger_(filters.pageSize, configuredPageSize, 5, CONFIG_.MAX_PAGE_SIZE);
-  const page = posts.slice(offset, offset + pageSize).map(function (post) {
-    return presentPost_(post, replyCounts[String(post.id)] || 0);
-  });
-
-  const tagCounts = {};
-  activePosts.forEach(function (post) {
-      parseTags_(post.tags).forEach(function (item) {
-        tagCounts[item] = (tagCounts[item] || 0) + 1;
-      });
-    });
-
-  return {
-    posts: page,
-    total: total,
-    offset: offset,
-    nextOffset: offset + page.length,
-    hasMore: offset + page.length < total,
-    tags: Object.keys(tagCounts)
-      .map(function (name) { return { name: name, count: tagCounts[name] }; })
-      .sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name, 'ja'); })
-  };
-}
-
-function buildDiscovery_(snapshot) {
-  const email = currentUserEmail_();
-  const allPosts = snapshot && snapshot.posts || readRecords_(CONFIG_.SHEETS.POSTS);
-  const posts = recordsOwnedBy_(allPosts, email)
-    .filter(function (post) { return !post.deletedAt; });
-  const counts = replyCountsByPost_(false, snapshot && snapshot.replies, email);
-  const todayMonthDay = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM-dd');
-  const currentYear = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy');
-  const onThisDay = posts.filter(function (post) {
-    const date = new Date(post.createdAt);
-    return Utilities.formatDate(date, Session.getScriptTimeZone(), 'MM-dd') === todayMonthDay &&
-      Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy') !== currentYear;
-  }).sort(compareCreatedDescending_)[0];
-
-  const unansweredCutoff = Date.now() - (7 * 24 * 60 * 60 * 1000);
-  const unanswered = posts
-    .filter(function (post) {
-      return !counts[String(post.id)] && new Date(post.createdAt).getTime() < unansweredCutoff;
-    })
-    .sort(compareCreatedAscending_)[0];
-  const random = posts.length ? posts[Math.floor(Math.random() * posts.length)] : null;
-
-  return {
-    onThisDay: onThisDay ? presentPost_(onThisDay, counts[String(onThisDay.id)] || 0) : null,
-    unanswered: unanswered ? presentPost_(unanswered, 0) : null,
-    random: random ? presentPost_(random, counts[String(random.id)] || 0) : null
-  };
-}
-
-function buildNotifications_(email, snapshot) {
-  const source = snapshot || createReadSnapshot_();
-  const posts = recordsOwnedBy_(source.posts || [], email).filter(function (post) { return !post.deletedAt; });
-  const replies = recordsOwnedBy_(source.replies || [], email).filter(function (reply) { return !reply.deletedAt; });
-  const postById = posts.reduce(function (result, post) {
-    result[String(post.id)] = post;
-    return result;
-  }, {});
-  const firstUserReplyAt = replies.reduce(function (result, reply) {
-    if (String(reply.authorType || 'user') === 'persona') return result;
-    const postId = String(reply.postId);
-    if (!result[postId] || String(reply.createdAt) < result[postId]) {
-      result[postId] = String(reply.createdAt);
-    }
-    return result;
-  }, {});
-  const settings = source.settings || readSettings_();
-  const readAt = String(settings.notificationsReadAt || '');
-  const readByPost = parseNotificationPostReadAt_(settings.notificationsReadByPost);
-  const items = replies
-    .filter(function (reply) {
-      if (String(reply.authorType || 'user') !== 'persona') return false;
-      const post = postById[String(reply.postId)];
-      if (!post) return false;
-      if (String(post.authorType || 'user') !== 'persona') return true;
-      const participatedAt = firstUserReplyAt[String(post.id)];
-      return Boolean(participatedAt && participatedAt < String(reply.createdAt));
-    })
-    .sort(compareCreatedDescending_)
-    .slice(0, 100)
-    .map(function (reply) {
-      const post = postById[String(reply.postId)];
-      return {
-        id: String(reply.id),
-        postId: String(reply.postId),
-        replyId: String(reply.id),
-        authorName: String(reply.authorName || 'AIアカウント'),
-        body: String(reply.body || ''),
-        postBody: String(post && post.body || ''),
-        createdAt: String(reply.createdAt || ''),
-        unread: isNotificationUnread_(reply, readAt, readByPost)
-      };
-    });
-  return {
-    items: items,
-    unreadCount: items.filter(function (item) { return item.unread; }).length,
-    readAt: readAt
-  };
-}
-
-function markNotificationPostRead_(postId) {
-  const normalizedPostId = String(postId || '');
-  if (!normalizedPostId) return;
-  const settings = readSettings_();
-  const readByPost = parseNotificationPostReadAt_(settings.notificationsReadByPost);
-  readByPost[normalizedPostId] = nowIso_();
-  writeSettings_({ notificationsReadByPost: JSON.stringify(compactNotificationPostReadAt_(readByPost)) });
-}
-
-function parseNotificationPostReadAt_(value) {
-  if (!value) return {};
-  try {
-    const parsed = JSON.parse(String(value));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.keys(parsed).reduce(function (result, postId) {
-      const readAt = String(parsed[postId] || '');
-      if (readAt) result[String(postId)] = readAt;
-      return result;
-    }, {});
-  } catch (error) {
-    return {};
-  }
-}
-
-function compactNotificationPostReadAt_(readByPost) {
-  return Object.keys(readByPost || {})
-    .map(function (postId) {
-      return { postId: String(postId), readAt: String(readByPost[postId] || '') };
-    })
-    .filter(function (item) { return item.postId && item.readAt; })
-    .sort(function (a, b) { return String(b.readAt).localeCompare(String(a.readAt)); })
-    .slice(0, 200)
-    .reduce(function (result, item) {
-      result[item.postId] = item.readAt;
-      return result;
-    }, {});
-}
-
-function isNotificationUnread_(reply, globalReadAt, readByPost) {
-  const createdAt = String(reply.createdAt || '');
-  const postReadAt = String(readByPost[String(reply.postId)] || '');
-  const readAt = [String(globalReadAt || ''), postReadAt]
-    .filter(Boolean)
-    .sort()
-    .pop() || '';
-  return !readAt || createdAt > readAt;
-}
-
-function createNotificationSnapshot_() {
-  return {
-    posts: readRecords_(CONFIG_.SHEETS.POSTS),
-    replies: readRecords_(CONFIG_.SHEETS.REPLIES),
-    settings: readSettings_()
-  };
-}
-
-function publicAiAutomationStatus_(status) {
-  return {
-    installed: Boolean(status && status.installed),
-    requestCounts: Object.assign({}, status && status.requestCounts || {}),
-    recentRequests: (status && status.recentRequests || []).map(function (request) {
-      return Object.assign({}, request);
-    })
-  };
-}
-
-function ownedRecord_(definition, id, email) {
-  const record = findRecordById_(definition, id);
-  if (normalizeEmail_(record.authorEmail) !== normalizeEmail_(email)) {
-    throw new Error('このデータを操作する権限がありません。');
-  }
-  return record;
-}
-
-function assertNotDeleted_(record) {
-  if (record.deletedAt) throw new Error('このデータはごみ箱にあります。');
-}
-
-function presentPost_(record, replyCount) {
-  return {
-    id: String(record.id),
-    body: String(record.body || ''),
-    tags: parseTags_(record.tags),
-    createdAt: String(record.createdAt || ''),
-    updatedAt: String(record.updatedAt || record.createdAt || ''),
-    favorite: parseBoolean_(record.favorite),
-    deletedAt: String(record.deletedAt || ''),
-    replyCount: Number(replyCount || 0),
-    authorType: String(record.authorType || 'user'),
-    authorId: String(record.authorId || ''),
-    authorName: String(record.authorName || ''),
-    sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeReferenceUrl_(record.sourceUrl)
-  };
-}
-
-function presentReply_(record) {
-  return {
-    id: String(record.id),
-    postId: String(record.postId),
-    parentReplyId: String(record.parentReplyId || ''),
-    body: String(record.body || ''),
-    createdAt: String(record.createdAt || ''),
-    updatedAt: String(record.updatedAt || record.createdAt || ''),
-    authorType: String(record.authorType || 'user'),
-    authorId: String(record.authorId || ''),
-    authorName: String(record.authorName || '')
-  };
-}
-
-function publicSettings_(settings, email) {
-  const aiAutomationIntervalHours = normalizeAiAutomationIntervalHours_(settings);
-  return {
-    displayName: String(settings.displayName || email.split('@')[0]),
-    email: email,
-    spreadsheetUrl: getSpreadsheet_().getUrl(),
-    theme: ['system', 'light', 'dark'].indexOf(settings.theme) >= 0 ? settings.theme : 'system',
-    pageSize: clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE),
-    aiAutomationIntervalHours: aiAutomationIntervalHours,
-    maxPostLength: CONFIG_.MAX_POST_LENGTH,
-    maxReplyLength: CONFIG_.MAX_REPLY_LENGTH,
-    maxTags: CONFIG_.MAX_TAGS,
-    maxPersonaNameLength: CONFIG_.MAX_PERSONA_NAME_LENGTH,
-    maxPersonaRoleLength: CONFIG_.MAX_PERSONA_ROLE_LENGTH,
-    maxPersonaPromptLength: CONFIG_.MAX_PERSONA_PROMPT_LENGTH
-  };
-}
-
-function listPersonas_(email, records) {
-  return recordsOwnedBy_(records || readRecords_(CONFIG_.SHEETS.PERSONAS), email)
-    .sort(function (a, b) {
-      return Number(parseBoolean_(b.enabled)) - Number(parseBoolean_(a.enabled)) ||
-        String(a.name).localeCompare(String(b.name), 'ja');
-    })
-    .map(presentPersona_);
-}
-
-function presentPersona_(record) {
-  return {
-    id: String(record.id || ''),
-    name: String(record.name || ''),
-    role: String(record.role || ''),
-    prompt: String(record.prompt || ''),
-    enabled: parseBoolean_(record.enabled),
-    avatarColor: normalizePersonaAvatarColor_(record.avatarColor, record.id),
-    createdAt: String(record.createdAt || ''),
-    updatedAt: String(record.updatedAt || record.createdAt || '')
-  };
-}
-
-function activeReplyCount_(postId) {
-  return readRecords_(CONFIG_.SHEETS.REPLIES).filter(function (reply) {
-    return String(reply.postId) === String(postId) && !reply.deletedAt;
-  }).length;
-}
-
-function replyCountsByPost_(includeDeleted, records, email) {
-  const replies = records || readRecords_(CONFIG_.SHEETS.REPLIES);
-  return countRepliesByPost_(email ? recordsOwnedBy_(replies, email) : replies, includeDeleted);
-}
-
-function compareCreatedDescending_(a, b) {
-  return String(b.createdAt).localeCompare(String(a.createdAt));
-}
-
-function compareCreatedAscending_(a, b) {
-  return String(a.createdAt).localeCompare(String(b.createdAt));
-}
-
-function compareDeletedDescending_(a, b) {
-  return String(b.deletedAt).localeCompare(String(a.deletedAt));
-}
-
-function localDateKey_(value) {
-  const date = value ? new Date(value) : new Date();
-  return Utilities.formatDate(date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-}
-

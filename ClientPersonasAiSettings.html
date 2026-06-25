@@ -1,0 +1,248 @@
+<!-- Persona management, AI automation controls and settings. -->
+
+  function applyPersonaTemplate(event) {
+    const button = event.target.closest('[data-persona-template]');
+    if (!button) return;
+    const template = PERSONA_TEMPLATES[button.dataset.personaTemplate];
+    if (!template) return;
+    queryOne('#persona-id').value = '';
+    queryOne('#persona-name').value = template.name;
+    queryOne('#persona-role').value = template.role;
+    queryOne('#persona-prompt').value = template.prompt;
+    queryOne('#persona-enabled').checked = true;
+    queryOne('#persona-submit').textContent = '疑似アカウントを追加';
+    queryOne('#persona-cancel').hidden = true;
+    queryOne('#persona-name').focus();
+  }
+
+
+  async function savePersona(event) {
+    event.preventDefault();
+    const submit = queryOne('#persona-submit');
+    const personaId = queryOne('#persona-id').value;
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      const persona = await callApi('apiSavePersona', personaId, {
+        name: queryOne('#persona-name').value,
+        role: queryOne('#persona-role').value,
+        prompt: queryOne('#persona-prompt').value,
+        enabled: queryOne('#persona-enabled').checked
+      });
+      const index = state.personas.findIndex(item => item.id === persona.id);
+      if (index >= 0) state.personas[index] = persona;
+      else state.personas.push(persona);
+      sortPersonas();
+      renderPersonas();
+      resetPersonaForm();
+      showToast(personaId ? '疑似アカウントを更新しました。' : '疑似アカウントを追加しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+      if (!queryOne('#persona-id').value) submit.textContent = '疑似アカウントを追加';
+    }
+  }
+
+
+  function sortPersonas() {
+    state.personas.sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.name.localeCompare(b.name, 'ja'));
+  }
+
+
+  function renderPersonas() {
+    const list = queryOne('#persona-list');
+    renderManualPersonaSelect();
+    if (!state.personas.length) {
+      list.innerHTML = '<div class="empty-state"><span class="empty-state-icon" aria-hidden="true">✦</span><h2>疑似アカウントはまだありません</h2><p>上のテンプレートを選ぶと、すぐに作り始められます。</p></div>';
+      return;
+    }
+    list.innerHTML = state.personas.map(persona => `
+      <article class="persona-card ${persona.enabled ? '' : 'disabled'}" data-persona-id="${escapeAttr(persona.id)}">
+        <div class="persona-card-header">
+          <div class="persona-card-title"><span class="avatar ai" data-avatar-color="${escapeAttr(personaAvatarColor(persona.id))}">${escapeHtml(initials(persona.name))}</span><div><h3>${escapeHtml(persona.name)}</h3><span class="persona-role">${escapeHtml(persona.role)}</span></div></div>
+          <span class="ai-badge">${persona.enabled ? '投稿候補' : '停止中'}</span>
+        </div>
+        <p class="persona-prompt">${escapeHtml(persona.prompt)}</p>
+        <div class="persona-actions">
+          <button class="secondary-button" type="button" data-persona-action="edit" data-id="${escapeAttr(persona.id)}">編集</button>
+          <button class="secondary-button" type="button" data-persona-action="toggle" data-id="${escapeAttr(persona.id)}">${persona.enabled ? '定時投稿から外す' : '定時投稿に戻す'}</button>
+          <button class="secondary-button" type="button" data-persona-action="delete" data-id="${escapeAttr(persona.id)}">削除</button>
+        </div>
+      </article>`).join('');
+  }
+
+
+  function renderManualPersonaSelect() {
+    const select = queryOne('#manual-ai-persona');
+    const current = select.value;
+    const enabled = state.personas.filter(persona => persona.enabled);
+    select.innerHTML = enabled.length
+      ? enabled.map(persona => `<option value="${escapeAttr(persona.id)}">${escapeHtml(persona.name)} — ${escapeHtml(persona.role)}</option>`).join('')
+      : '<option value="">有効な疑似アカウントがありません</option>';
+    if (enabled.some(persona => persona.id === current)) select.value = current;
+    const button = queryOne('#manual-ai-post-button');
+    if (!button.dataset.originalLabel) button.disabled = !enabled.length;
+  }
+
+
+  function renderAiAutomation() {
+    const status = state.aiAutomation || { installed: false };
+    const pill = queryOne('#ai-automation-status');
+    pill.textContent = status.installed ? '自動化中' : '停止中';
+    pill.classList.toggle('active', Boolean(status.installed));
+    queryOne('#ai-install-button').disabled = Boolean(status.installed);
+    queryOne('#ai-uninstall-button').disabled = !status.installed;
+    renderManualPersonaSelect();
+  }
+
+
+  async function refreshAiAutomation(processGenerated = false) {
+    const button = queryOne('#ai-refresh-button');
+    button.disabled = true;
+    try {
+      if (processGenerated) {
+        await syncApplication({ includeTimeline: shouldSyncTimeline(), processAiResponses: true, userVisible: true });
+        showToast('生成済みのAI投稿をタイムラインへ反映しました。');
+      } else {
+        state.aiAutomation = await callApi('apiGetAiAutomationStatus');
+        renderAiAutomation();
+      }
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+
+  async function installAiAutomation() {
+    const button = queryOne('#ai-install-button');
+    setButtonBusy(button, true, '設定中…');
+    try {
+      await callApi('apiInstallAiAutomation');
+      await refreshAiAutomation();
+      showToast('AI自動化を有効にしました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderAiAutomation();
+    }
+  }
+
+
+  async function uninstallAiAutomation() {
+    const button = queryOne('#ai-uninstall-button');
+    setButtonBusy(button, true, '停止中…');
+    try {
+      await callApi('apiUninstallAiAutomation');
+      await refreshAiAutomation();
+      showToast('AI自動化を停止しました。手動投稿は引き続き利用できます。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderAiAutomation();
+    }
+  }
+
+
+  async function requestManualAiPost() {
+    const button = queryOne('#manual-ai-post-button');
+    const personaId = queryOne('#manual-ai-persona').value;
+    setButtonBusy(button, true, '依頼中…');
+    try {
+      const result = await callApi('apiRequestAiPost', personaId);
+      if (!result.created) throw new Error(result.reason || 'AI投稿を依頼できませんでした。');
+      showToast('Workspace StudioへAI投稿を依頼しました。');
+      await pollAiRequest(result.requestId);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(button, false);
+      renderManualPersonaSelect();
+    }
+  }
+
+
+  async function pollAiRequest(requestId) {
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      if (attempt) await new Promise(resolve => window.setTimeout(resolve, 5000));
+      await syncApplication({ includeTimeline: shouldSyncTimeline(), processAiResponses: true, userVisible: false });
+      const request = (state.aiAutomation.recentRequests || []).find(item => item.id === requestId);
+      if (request && request.status === 'PUBLISHED') {
+        await syncApplication({ includeTimeline: shouldSyncTimeline(), processAiResponses: false, userVisible: false });
+        showToast('AI投稿をタイムラインへ反映しました。');
+        return;
+      }
+      if (request && request.status === 'ERROR') throw new Error(request.errorMessage || 'AI投稿の作成に失敗しました。');
+    }
+    showToast('AI投稿はまだ生成中です。少し時間をおいて「生成結果を反映」を押してください。');
+  }
+
+
+  async function handlePersonaAction(event) {
+    const button = event.target.closest('[data-persona-action]');
+    if (!button) return;
+    const persona = state.personas.find(item => item.id === button.dataset.id);
+    if (!persona) return;
+    if (button.dataset.personaAction === 'edit') {
+      queryOne('#persona-id').value = persona.id;
+      queryOne('#persona-name').value = persona.name;
+      queryOne('#persona-role').value = persona.role;
+      queryOne('#persona-prompt').value = persona.prompt;
+      queryOne('#persona-enabled').checked = persona.enabled;
+      queryOne('#persona-submit').textContent = '変更を保存';
+      queryOne('#persona-cancel').hidden = false;
+      queryOne('#persona-name').focus();
+      return;
+    }
+    if (button.dataset.personaAction === 'toggle') {
+      try {
+        const updated = await callApi('apiTogglePersona', persona.id);
+        state.personas[state.personas.findIndex(item => item.id === updated.id)] = updated;
+        sortPersonas();
+        renderPersonas();
+      } catch (error) { showToast(error.message, true); }
+      return;
+    }
+    const confirmed = await confirmAction('疑似アカウントを削除しますか？', '過去の投稿は残りますが、今後この人物は選ばれません。', '削除する');
+    if (!confirmed) return;
+    try {
+      await callApi('apiDeletePersona', persona.id);
+      state.personas = state.personas.filter(item => item.id !== persona.id);
+      renderPersonas();
+      if (queryOne('#persona-id').value === persona.id) resetPersonaForm();
+      showToast('疑似アカウントを削除しました。');
+    } catch (error) { showToast(error.message, true); }
+  }
+
+
+  function resetPersonaForm() {
+    queryOne('#persona-form').reset();
+    queryOne('#persona-id').value = '';
+    queryOne('#persona-enabled').checked = true;
+    queryOne('#persona-submit').textContent = '疑似アカウントを追加';
+    queryOne('#persona-cancel').hidden = true;
+  }
+
+
+  async function saveSettings(event) {
+    event.preventDefault();
+    const submit = event.submitter || queryOne('#settings-form button[type="submit"]');
+    setButtonBusy(submit, true, '保存中…');
+    try {
+      state.settings = await callApi('apiSaveSettings', {
+        displayName: queryOne('#display-name-input').value,
+        theme: queryOne('#theme-input').value,
+        pageSize: Number(queryOne('#page-size-input').value),
+        aiAutomationIntervalHours: Number(queryOne('#ai-frequency-input').value)
+      });
+      applySettings();
+      showToast('設定を保存しました。');
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      setButtonBusy(submit, false);
+    }
+  }

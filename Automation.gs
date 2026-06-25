@@ -235,7 +235,7 @@ function checkPorotterAiAutomation() {
   return buildAiAutomationStatus_(email);
 }
 
-function buildAiAutomationStatus_(email) {
+function buildAiAutomationStatus_(email, requestRecords) {
   ensureSchema_(getSpreadsheet_());
   const handlers = porotterAiTriggerHandlers_();
   const legacyHandlers = legacyPorotterAiTriggerHandlers_();
@@ -243,7 +243,7 @@ function buildAiAutomationStatus_(email) {
   const installedHandlers = ScriptApp.getProjectTriggers().map(function (trigger) {
     return trigger.getHandlerFunction();
   });
-  const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
+  const requests = requestRecords || recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
   const counts = requests
     .reduce(function (result, request) {
       const status = String(request.status || 'UNKNOWN');

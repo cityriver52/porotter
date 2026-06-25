@@ -1,0 +1,218 @@
+<!-- Timeline, filtering, cards and favorite actions. -->
+
+  async function applyFilters(event) {
+    event.preventDefault();
+    readFilterControls();
+    await loadTimeline(false);
+  }
+
+
+  function readFilterControls() {
+    state.filters.query = queryOne('#search-input').value.trim();
+    state.filters.tag = normalizeSingleTag(queryOne('#search-tag').value);
+    state.filters.startDate = queryOne('#start-date').value;
+    state.filters.endDate = queryOne('#end-date').value;
+    state.filters.replyState = queryOne('#reply-state').value;
+    state.filters.offset = 0;
+  }
+
+
+  function toggleAdvancedFilters() {
+    const panel = queryOne('#advanced-filters');
+    panel.hidden = !panel.hidden;
+    queryOne('#filter-toggle').setAttribute('aria-expanded', String(!panel.hidden));
+  }
+
+
+  async function clearFilters() {
+    queryOne('#filter-form').reset();
+    queryOne('#start-date').value = '';
+    queryOne('#end-date').value = '';
+    queryOne('#reply-state').value = '';
+    state.filters = createFilters(state.currentView);
+    await loadTimeline(false);
+  }
+
+
+  async function filterByTag(event) {
+    const button = event.target.closest('[data-filter-tag]');
+    if (!button) return;
+    if (state.currentView !== 'search') {
+      await switchView('search', false);
+    }
+    state.filters.tag = state.filters.tag === button.dataset.filterTag ? '' : button.dataset.filterTag;
+    queryOne('#search-tag').value = state.filters.tag ? '#' + state.filters.tag : '';
+    closeTagSuggestions('search');
+    state.filters.offset = 0;
+    await loadTimeline(false);
+  }
+
+
+  function timelineTargets() {
+    return state.currentView === 'search'
+      ? { list: '#search-timeline', status: '#search-timeline-status', loadMore: '#search-load-more' }
+      : { list: '#timeline', status: '#timeline-status', loadMore: '#load-more' };
+  }
+
+
+  async function loadTimeline(append) {
+    if (state.loadingTimeline) return;
+    state.loadingTimeline = true;
+    const targets = timelineTargets();
+    const loadMore = queryOne(targets.loadMore);
+    setButtonBusy(loadMore, true, '読み込み中…');
+    if (!append) {
+      state.filters.offset = 0;
+      renderSkeletons();
+    }
+    try {
+      const data = await callApi('apiTimeline', state.filters);
+      applyTimelineData(data, append);
+      renderTimeline();
+      renderTagFilters();
+    } catch (error) {
+      showToast(error.message, true);
+      if (!append) renderEmptyState('読み込めませんでした', 'しばらく待ってから、もう一度お試しください。', targets.list);
+    } finally {
+      state.loadingTimeline = false;
+      setButtonBusy(loadMore, false);
+    }
+  }
+
+
+  function renderTimeline() {
+    const targets = timelineTargets();
+    const timeline = queryOne(targets.list);
+    if (!state.posts.length) {
+      const filtered = Boolean(state.filters.query || state.filters.tag || state.filters.startDate || state.filters.endDate || state.filters.replyState || state.filters.favoriteOnly);
+      timeline.innerHTML = emptyStateHtml(
+        filtered ? '条件に合う投稿がありません' : '最初のひとことを残してみましょう',
+        filtered ? '検索条件を変えると、別の思考が見つかるかもしれません。' : '大きな気づきでなくても大丈夫。今日の小さな感触から始められます。'
+      );
+    } else {
+      timeline.innerHTML = state.posts.map(post => postHtml(post, { threadOpenable: true })).join('');
+    }
+    queryOne(targets.status).textContent = state.total ? `${state.total}件の投稿` : '';
+    queryOne(targets.loadMore).hidden = !state.hasMore;
+    renderFilterSummary();
+  }
+
+
+  function postHtml(post, options = {}) {
+    const deleted = Boolean(post.deletedAt);
+    const edited = post.updatedAt && post.updatedAt !== post.createdAt;
+    const isPersona = post.authorType === 'persona';
+    const authorName = isPersona ? (post.authorName || 'AIアカウント') : (state.settings && state.settings.displayName || 'me');
+    const avatarColor = isPersona ? personaAvatarColor(post.authorId) : '';
+    const sourceHtml = post.sourceLabel || post.sourceUrl
+      ? `<div class="post-source">参考：${post.sourceUrl ? `<a href="${escapeAttr(post.sourceUrl)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(post.sourceLabel || (isPersona ? 'Google Workspace' : '参考リンク'))}</a>` : escapeHtml(post.sourceLabel)}</div>`
+      : '';
+    const threadOpenable = Boolean(options.threadOpenable && !deleted);
+    return `
+      <article class="post-card ${options.threadRoot ? 'thread-root' : ''} ${threadOpenable ? 'thread-openable' : ''}" data-post-id="${escapeAttr(post.id)}"${threadOpenable ? ' data-open-thread="true" tabindex="0" aria-label="投稿のスレッドを開く"' : ''}>
+        <span class="avatar ${isPersona ? 'ai' : ''}"${isPersona ? ` data-avatar-color="${escapeAttr(avatarColor)}"` : ''}>${escapeHtml(initials(authorName))}</span>
+        <div class="post-main">
+          <div class="post-meta">
+            <strong>${escapeHtml(authorName)}</strong>
+            ${isPersona ? '<span class="ai-badge">AI</span>' : ''}
+            <span class="post-handle">${isPersona ? '@porotter-ai' : '@private'}</span>
+            <time class="post-time" datetime="${escapeAttr(post.createdAt)}" title="${escapeAttr(formatExactDate(post.createdAt))}">${escapeHtml(formatRelativeDate(post.createdAt))}</time>
+            ${edited ? '<span class="edited-label">編集済み</span>' : ''}
+          </div>
+          <p class="post-body">${formatBody(post.body)}</p>
+          ${sourceHtml}
+          ${post.tags && post.tags.length ? `<div class="post-tags">${post.tags.map(tag => `<button type="button" data-filter-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</button>`).join('')}</div>` : ''}
+          ${deleted ? `
+            <div class="trash-actions">
+              <button class="secondary-button" type="button" data-action="restore" data-id="${escapeAttr(post.id)}">復元する</button>
+              <button class="danger-button" type="button" data-action="purge" data-id="${escapeAttr(post.id)}">完全に削除</button>
+            </div>
+          ` : `
+            <div class="post-actions">
+              <button class="post-action" type="button" data-action="reply" data-id="${escapeAttr(post.id)}" aria-label="返信">
+                <span aria-hidden="true">↩</span><span>${Number(post.replyCount) || ''}</span>
+              </button>
+              <button class="post-action favorite ${post.favorite ? 'active' : ''}" type="button" data-action="favorite" data-id="${escapeAttr(post.id)}" aria-label="お気に入り${post.favorite ? 'を解除' : 'に追加'}">
+                <span aria-hidden="true">${post.favorite ? '♥' : '♡'}</span>
+              </button>
+              <button class="post-action" type="button" data-action="edit-post" data-id="${escapeAttr(post.id)}" aria-label="編集"><span aria-hidden="true">✎</span></button>
+              <button class="post-action delete" type="button" data-action="delete-post" data-id="${escapeAttr(post.id)}" aria-label="削除"><span aria-hidden="true">⌫</span></button>
+            </div>
+          `}
+        </div>
+      </article>`;
+  }
+
+
+  function renderTagFilters() {
+    queryOne('#tag-filter-list').innerHTML = state.tags.slice(0, 20).map(tag => `
+      <button type="button" class="tag-pill ${state.filters.tag === tag.name ? 'active' : ''}" data-filter-tag="${escapeAttr(tag.name)}">
+        #${escapeHtml(tag.name)} <span>${tag.count}</span>
+      </button>`).join('');
+  }
+
+
+  function renderFilterSummary() {
+    const labels = [];
+    if (state.filters.query) labels.push(`「${state.filters.query}」`);
+    if (state.filters.tag) labels.push(`#${state.filters.tag}`);
+    if (state.filters.startDate || state.filters.endDate) labels.push(`${state.filters.startDate || '指定なし'}〜${state.filters.endDate || '指定なし'}`);
+    if (state.filters.replyState) labels.push(state.filters.replyState === 'with' ? '返信あり' : '返信なし');
+    if (state.filters.favoriteOnly) labels.push('お気に入り');
+    queryOne('#active-filter-summary').textContent = labels.length ? `絞り込み中：${labels.join('・')}` : '';
+  }
+
+
+  async function handleTimelineAction(event) {
+    const tag = event.target.closest('[data-filter-tag]');
+    if (tag) return filterByTag({ target: tag });
+    const button = event.target.closest('[data-action]');
+    if (button) {
+      const id = button.dataset.id;
+      const action = button.dataset.action;
+      if (action === 'favorite') return toggleFavorite(id, button);
+      if (action === 'reply') return openThread(id);
+      if (action === 'edit-post') return openPostEditor(id);
+      if (action === 'delete-post') return deletePost(id);
+      return;
+    }
+    const postId = timelinePostIdFromEvent(event);
+    if (postId) return openThread(postId);
+  }
+
+
+  function timelinePostIdFromEvent(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return '';
+    if (target.closest('a, button, input, textarea, select, summary, details, label')) return '';
+    const post = target.closest('.post-card[data-open-thread="true"]');
+    return post ? String(post.dataset.postId || '') : '';
+  }
+
+
+  function handleTimelineKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const post = event.target && event.target.closest && event.target.closest('.post-card[data-open-thread="true"]');
+    if (!post || event.target !== post) return;
+    event.preventDefault();
+    openThread(post.dataset.postId);
+  }
+
+
+  async function toggleFavorite(id, button) {
+    button.disabled = true;
+    try {
+      const result = await callApi('apiToggleFavorite', id);
+      const post = state.posts.find(item => item.id === id);
+      if (post) post.favorite = result.favorite;
+      if (state.currentView === 'favorites' && !result.favorite) {
+        await loadTimeline(false);
+      } else {
+        renderTimeline();
+      }
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }

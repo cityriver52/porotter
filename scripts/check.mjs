@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
+const clientPartials = [
+  'ClientState', 'ClientCore', 'ClientComposer', 'ClientTimeline', 'ClientThread',
+  'ClientViews', 'ClientSyncNotifications', 'ClientPersonasAiSettings', 'ClientDialogsUtils'
+];
 
 for (const filename of fs.readdirSync(root).filter(name => name.endsWith('.gs'))) {
   try {
@@ -27,16 +31,18 @@ try {
   errors.push(`appsscript.json: ${error.message}`);
 }
 
-const clientFile = fs.readFileSync(path.join(root, 'JavaScript.html'), 'utf8');
-const clientScript = clientFile.replace(/^\s*<script>\s*/, '').replace(/\s*<\/script>\s*$/, '');
+const clientFile = clientPartials
+  .map(name => fs.readFileSync(path.join(root, `${name}.html`), 'utf8'))
+  .join('\n');
+const clientScript = `'use strict';\n(() => {\n${clientFile}\n})();`;
 try {
-  new vm.Script(clientScript, { filename: 'JavaScript.html' });
+  new vm.Script(clientScript, { filename: 'ClientBundle.html' });
 } catch (error) {
-  errors.push(`JavaScript.html: ${error.message}`);
+  errors.push(`ClientBundle.html: ${error.message}`);
 }
 
 const index = fs.readFileSync(path.join(root, 'Index.html'), 'utf8');
-for (const partial of ['Styles', 'JavaScript']) {
+for (const partial of ['Styles'].concat(clientPartials)) {
   if (!index.includes(`include_('${partial}')`)) errors.push(`Index.html: ${partial} partial is not included`);
 }
 
@@ -45,7 +51,7 @@ const duplicateIds = ids.filter((id, indexOfId) => ids.indexOf(id) !== indexOfId
 if (duplicateIds.length) errors.push(`Index.html: duplicate IDs: ${[...new Set(duplicateIds)].join(', ')}`);
 const referencedIds = Array.from(clientFile.matchAll(/queryOne\(['"]#([A-Za-z0-9_-]+)['"]/g), match => match[1]);
 const missingReferencedIds = [...new Set(referencedIds.filter(id => !ids.includes(id)))];
-if (missingReferencedIds.length) errors.push(`JavaScript.html references missing DOM IDs: ${missingReferencedIds.join(', ')}`);
+if (missingReferencedIds.length) errors.push(`ClientBundle.html references missing DOM IDs: ${missingReferencedIds.join(', ')}`);
 
 const timelineView = index.slice(index.indexOf('id="timeline-view"'), index.indexOf('id="search-view"'));
 const searchView = index.slice(index.indexOf('id="search-view"'), index.indexOf('id="trash-view"'));
@@ -78,8 +84,8 @@ for (const requiredUi of ['id="post-source-url"', 'id="edit-source-url"']) {
 if (index.includes('id="ai-request-status"') || clientFile.includes('AI投稿の実行履歴')) {
   errors.push('Manual AI request history should not be rendered in settings');
 }
-for (const requiredClient of ["callApi('apiSetupPorotter'", "callApi('apiNotifications'", "callApi('apiRequestAiPost'"]) {
-  if (!clientFile.includes(requiredClient)) errors.push(`JavaScript.html: required API integration is missing: ${requiredClient}`);
+for (const requiredClient of ["callApi('apiSetupPorotter'", "callApi('apiSync'", "callApi('apiRequestAiPost'"]) {
+  if (!clientFile.includes(requiredClient)) errors.push(`ClientBundle.html: required API integration is missing: ${requiredClient}`);
 }
 const automationSource = fs.readdirSync(root)
   .filter(name => name.endsWith('.gs'))

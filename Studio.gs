@@ -30,6 +30,7 @@ function publishGeneratedPorotter_(email, personaId, actionContextValue, generat
     sourceUrl: generated.sourceUrl
   });
   appendRecord_(CONFIG_.SHEETS.POSTS, post);
+  touchContentUpdated_();
   return {
     entryType: 'post',
     postId: post.id,
@@ -395,6 +396,7 @@ function publishStudioReply_(email, persona, post, parentReplyId, body) {
     authorName: persona.name
   });
   appendRecord_(CONFIG_.SHEETS.REPLIES, reply);
+  touchContentAndNotificationsUpdated_();
   return {
     entryType: 'reply',
     postId: post.id,

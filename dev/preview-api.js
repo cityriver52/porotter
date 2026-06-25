@@ -3,7 +3,7 @@
   const iso = offsetDays => new Date(now - offsetDays * 86400000).toISOString();
   let posts = [
     { id: 'p1', body: '会議で出た小さな違和感。結論を急ぐより、問いを一度持ち帰る時間が必要なのかもしれない。', tags: ['違和感', 'あとで考える'], createdAt: iso(0.03), updatedAt: iso(0.03), favorite: true, deletedAt: '', replyCount: 2, authorType: 'user', authorName: '', sourceUrl: 'https://example.com/reference' },
-    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 2, authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
+    { id: 'p2', body: '制約が多い案件ほど、最初の言葉選びが設計そのものになる。', tags: ['学び', 'AIの視点'], createdAt: iso(1), updatedAt: iso(1), favorite: false, deletedAt: '', replyCount: 2, authorType: 'persona', authorId: 'persona-1', authorName: '横展開の連想家', sourceLabel: '最近更新されたプロジェクト資料', sourceUrl: '' },
     { id: 'p3', body: '「便利にする」と「考えなくてよくする」は似ているようで違う。ここはもう少し掘りたい。', tags: ['アイデア'], createdAt: iso(9), updatedAt: iso(8), favorite: false, deletedAt: '', replyCount: 1 },
     { id: 'p4', body: '午後の集中力は、タスクの難しさより切り替え回数に削られている気がする。', tags: ['気づき'], createdAt: iso(30), updatedAt: iso(30), favorite: true, deletedAt: '', replyCount: 0 }
   ];
@@ -12,15 +12,28 @@
     { id: 'r2', postId: 'p1', parentReplyId: '', body: '次回は最初に「今日は何を決めないか」も確認してみる。', createdAt: iso(0.01), updatedAt: iso(0.01), authorType: 'user', authorName: 'わたし' },
     { id: 'r3', postId: 'p3', parentReplyId: '', body: '便利さの評価軸に、利用者の判断力が残るかを加える。', createdAt: iso(7), updatedAt: iso(7), authorType: 'user', authorName: 'わたし' },
     { id: 'r4', postId: 'p2', parentReplyId: '', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), authorType: 'user', authorName: 'わたし' },
-    { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), authorType: 'persona', authorId: 'persona-1', authorName: '細部に気づく人' }
+    { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), authorType: 'persona', authorId: 'persona-1', authorName: '横展開の連想家' }
   ];
   let settings = { displayName: 'わたし', email: 'me@example.com', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/preview', theme: 'system', pageSize: 20, aiAutomationIntervalHours: 6, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
-    { id: 'persona-1', name: '細部に気づく人', role: 'まじめで細やかなことによく気が付く人', prompt: '曖昧な表現や小さな抜けを丁寧に見つけます。', enabled: true, avatarColor: 'teal', createdAt: iso(2), updatedAt: iso(2) }
+    { id: 'persona-1', name: '横展開の連想家', role: '別業務への応用を考える人', prompt: 'ある業務で見つけた工夫、失敗、判断軸を、別の業務や手順に横展開して考えます。共通する構造を見つけ、連想ゲームのように応用先を短く示します。', enabled: true, avatarColor: 'teal', createdAt: iso(2), updatedAt: iso(2) }
   ];
 
   const uuid = prefix => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const activePosts = () => posts.filter(post => !post.deletedAt);
+  const syncState = () => {
+    const contentCursor = posts.concat(replies)
+      .flatMap(item => [item.createdAt, item.updatedAt, item.deletedAt])
+      .filter(Boolean)
+      .sort()
+      .pop() || '';
+    const aiCursor = (aiAutomation.recentRequests || [])
+      .flatMap(item => [item.createdAt, item.updatedAt])
+      .filter(Boolean)
+      .sort()
+      .pop() || '';
+    return { contentCursor, notificationsCursor: contentCursor, aiCursor, generatedAt: new Date().toISOString() };
+  };
   const timeline = filters => {
     const query = String(filters?.query || '').toLocaleLowerCase();
     const tag = String(filters?.tag || '').toLocaleLowerCase();
@@ -43,19 +56,38 @@
   let notifications = {
     unreadCount: 1,
     readAt: iso(2),
-    items: [{ id: 'r5', postId: 'p2', replyId: 'r5', authorName: '細部に気づく人', body: replies.find(reply => reply.id === 'r5').body, postBody: posts.find(post => post.id === 'p2').body, createdAt: replies.find(reply => reply.id === 'r5').createdAt, unread: true }]
+    items: [{ id: 'r5', postId: 'p2', replyId: 'r5', authorName: '横展開の連想家', body: replies.find(reply => reply.id === 'r5').body, postBody: posts.find(post => post.id === 'p2').body, createdAt: replies.find(reply => reply.id === 'r5').createdAt, unread: true }]
   };
   let aiAutomation = {
     installed: true,
     requestCounts: { PUBLISHED: 1 },
-    recentRequests: [{ id: 'ai-1', status: 'PUBLISHED', personaName: '細部に気づく人', actionType: '返信', targetSummary: 'ユーザーの返信に応答', errorMessage: '', createdAt: iso(0.8), updatedAt: iso(0.8) }]
+    recentRequests: [{ id: 'ai-1', status: 'PUBLISHED', personaName: '横展開の連想家', actionType: '返信', targetSummary: 'ユーザーの返信に応答', errorMessage: '', createdAt: iso(0.8), updatedAt: iso(0.8) }]
   };
 
   const api = {
     apiSetupStatus: () => ({ configured: true, authorized: true, email: settings.email }),
     apiSetupPorotter: () => ({ allowedEmail: settings.email, message: '初期設定が完了しました。' }),
-    apiBootstrap: filters => ({ timeline: timeline(filters), settings, discovery: discovery(), personas, notifications, aiAutomation }),
+    apiBootstrap: filters => ({ timeline: timeline(filters), settings, discovery: discovery(), personas, notifications, aiAutomation, sync: syncState() }),
     apiTimeline: filters => timeline(filters),
+    apiSync: payload => {
+      const sync = syncState();
+      const client = payload?.sync || {};
+      const contentChanged = !client.contentCursor || sync.contentCursor > String(client.contentCursor || '');
+      const notificationsChanged = contentChanged || !client.notificationsCursor || sync.notificationsCursor > String(client.notificationsCursor || '');
+      const aiChanged = !client.aiCursor || sync.aiCursor > String(client.aiCursor || '');
+      return {
+        changed: contentChanged || notificationsChanged || aiChanged,
+        contentChanged,
+        notificationsChanged,
+        aiChanged,
+        sync,
+        notifications: notificationsChanged || payload?.includeNotifications ? notifications : undefined,
+        aiAutomation,
+        timeline: contentChanged && payload?.includeTimeline !== false ? timeline(payload?.filters || {}) : undefined,
+        aiProcessResult: { processedCount: 0, publishedCount: 0, errorCount: 0, results: [] },
+        aiProcessError: ''
+      };
+    },
     apiCreatePost: payload => {
       const stamp = new Date().toISOString();
       const post = { id: uuid('p'), body: String(payload.body).trim(), tags: payload.tags || [], sourceUrl: payload.sourceUrl || '', createdAt: stamp, updatedAt: stamp, favorite: false, deletedAt: '', replyCount: 0, authorType: 'user', authorName: '' };

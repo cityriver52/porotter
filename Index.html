@@ -266,7 +266,7 @@
                 <button class="template-chip" type="button" data-persona-template="finance">財務経理担当</button>
                 <button class="template-chip" type="button" data-persona-template="project">このプロジェクトの担当</button>
                 <button class="template-chip" type="button" data-persona-template="wild">突飛なアイデアを出す人</button>
-                <button class="template-chip" type="button" data-persona-template="careful">まじめで細やかな人</button>
+                <button class="template-chip" type="button" data-persona-template="careful">横展開の連想家</button>
               </div>
               <form id="persona-form" class="persona-form">
                 <input id="persona-id" type="hidden">
@@ -344,6 +344,20 @@
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
     <div id="initial-loader" class="initial-loader" role="status"><span class="loader-mark">ぽ</span><span>ぽろったーを準備しています…</span></div>
 
-    <?!= include_('JavaScript'); ?>
+    <script>
+      'use strict';
+
+      (() => {
+        <?!= include_('ClientState'); ?>
+        <?!= include_('ClientCore'); ?>
+        <?!= include_('ClientComposer'); ?>
+        <?!= include_('ClientTimeline'); ?>
+        <?!= include_('ClientThread'); ?>
+        <?!= include_('ClientViews'); ?>
+        <?!= include_('ClientSyncNotifications'); ?>
+        <?!= include_('ClientPersonasAiSettings'); ?>
+        <?!= include_('ClientDialogsUtils'); ?>
+      })();
+    </script>
   </body>
 </html>
