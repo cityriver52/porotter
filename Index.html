@@ -87,6 +87,7 @@
                 <span aria-hidden="true">🔗</span>
                 <input id="post-source-url" type="url" inputmode="url" placeholder="参考リンク（任意・https://）" autocomplete="url">
               </label>
+              <label class="checkbox-label subtle-option"><input id="post-ai-reply-disabled" type="checkbox"> AI返信不要</label>
 
               <div id="quick-tags" class="quick-tags" aria-label="クイックタグ">
                 <button type="button" class="tag-toggle" data-quick-tag="アイデア">#アイデア</button>
@@ -319,7 +320,7 @@
       <form id="reply-form" class="reply-form">
         <label class="sr-only" for="reply-body">返信を入力</label>
         <textarea id="reply-body" rows="2" maxlength="280" placeholder="考えをつなげる…" required></textarea>
-        <div class="reply-footer"><span id="reply-count" class="character-count">0 / 280</span><button class="primary-button" type="submit">返信する</button></div>
+        <div class="reply-footer"><label class="checkbox-label subtle-option"><input id="reply-ai-reply-disabled" type="checkbox"> AI返信不要</label><span id="reply-count" class="character-count">0 / 280</span><button class="primary-button" type="submit">返信する</button></div>
       </form>
     </dialog>
 

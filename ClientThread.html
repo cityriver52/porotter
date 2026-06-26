@@ -60,7 +60,10 @@
     setButtonBusy(submit, true, '返信中…');
     try {
       const targetId = state.replyTargetId || state.thread.post.id;
-      const reply = await callApi('apiCreateReply', targetId, { body: queryOne('#reply-body').value });
+      const reply = await callApi('apiCreateReply', targetId, {
+        body: queryOne('#reply-body').value,
+        aiReplyDisabled: queryOne('#reply-ai-reply-disabled').checked
+      });
       state.thread.replies.push(reply);
       state.thread.post.replyCount = state.thread.replies.length;
       const parentReply = state.thread.replies.find(item => item.id === targetId);

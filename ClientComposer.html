@@ -29,9 +29,10 @@
     const body = queryOne('#post-body').value;
     const tags = parseTagInput(queryOne('#post-tags').value);
     const sourceUrl = queryOne('#post-source-url').value;
+    const aiReplyDisabled = queryOne('#post-ai-reply-disabled').checked;
     setButtonBusy(submit, true, '投稿中…');
     try {
-      const post = await callApi('apiCreatePost', { body, tags, sourceUrl });
+      const post = await callApi('apiCreatePost', { body, tags, sourceUrl, aiReplyDisabled });
       state.posts.unshift(post);
       state.total += 1;
       queryOne('#post-form').reset();

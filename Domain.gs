@@ -24,7 +24,8 @@ function createEntryRecord_(options) {
     sourceLabel: String(options.sourceLabel || ''),
     sourceUrl: normalizeReferenceUrl_(options.sourceUrl),
     parentId: parentId,
-    rootId: String(options.rootId || (parentId ? '' : id))
+    rootId: String(options.rootId || (parentId ? '' : id)),
+    aiReplyDisabled: parseBoolean_(options.aiReplyDisabled)
   };
 }
 
