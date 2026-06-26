@@ -235,7 +235,8 @@ test('REQUESTED queue rows do not block later AI request creation', () => {
     displayName: 'owner',
     theme: 'system',
     pageSize: 20,
-    aiAutomationIntervalHours: 1
+    aiWorkHoursIntervalHours: 1,
+    aiOffHoursIntervalHours: 1
   });
 
   const first = app.apiRequestAiPost(persona.id).data;
@@ -448,17 +449,32 @@ test('AI automation interval is configurable and manual posts bypass the schedul
   }).data;
   const settings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 1
+    aiWorkHoursIntervalHours: 1,
+    aiOffHoursIntervalHours: 1
   }).data;
-  assert.equal(settings.aiAutomationIntervalHours, 1);
+  assert.equal(settings.aiWorkHoursIntervalHours, 1);
+  assert.equal(settings.aiOffHoursIntervalHours, 1);
   const minuteSettings = app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 20 / 60
+    aiWorkHoursIntervalHours: 20 / 60,
+    aiOffHoursIntervalHours: 20 / 60
   }).data;
-  assert.equal(minuteSettings.aiAutomationIntervalHours, 20 / 60);
+  assert.equal(minuteSettings.aiWorkHoursIntervalHours, 20 / 60);
+  assert.equal(minuteSettings.aiOffHoursIntervalHours, 20 / 60);
+  const splitSettings = app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
+    aiWorkHoursIntervalHours: 10 / 60,
+    aiOffHoursIntervalHours: 6
+  }).data;
+  assert.equal(splitSettings.aiWorkHoursIntervalHours, 10 / 60);
+  assert.equal(splitSettings.aiOffHoursIntervalHours, 6);
+  assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T00:00:00.000Z')), 10 / 60);
+  assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T08:15:00.000Z')), 10 / 60);
+  assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T08:16:00.000Z')), 6);
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 1
+    aiWorkHoursIntervalHours: 1,
+    aiOffHoursIntervalHours: 1
   });
 
   const scheduled = app.preparePorotterAiRequest();
@@ -470,7 +486,8 @@ test('AI automation interval is configurable and manual posts bypass the schedul
 
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 10 / 60
+    aiWorkHoursIntervalHours: 10 / 60,
+    aiOffHoursIntervalHours: 10 / 60
   });
   const slightlyEarlyTimestamp = new Date(Date.now() - (8.75 * 60 * 1000)).toISOString();
   app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, {
@@ -485,7 +502,8 @@ test('AI automation interval is configurable and manual posts bypass the schedul
 
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 0
+    aiWorkHoursIntervalHours: 0,
+    aiOffHoursIntervalHours: 0
   });
   const manual = app.apiRequestAiPost(persona.id).data;
   assert.equal(manual.created, true);
@@ -502,7 +520,8 @@ test('AI automation interval is configurable and manual posts bypass the schedul
   replyApp.apiCreateReply(aiPost.postId, { body: 'seed reply' });
   replyApp.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
-    aiAutomationIntervalHours: 2
+    aiWorkHoursIntervalHours: 2,
+    aiOffHoursIntervalHours: 2
   });
   const forcedPost = replyApp.apiRequestAiPost(replyPersona.id).data;
   assert.equal(forcedPost.actionType, '新規投稿');
@@ -528,7 +547,8 @@ test('AI automation interval is configurable and manual posts bypass the schedul
     displayName: 'owner',
     theme: 'system',
     pageSize: 20,
-    aiAutomationIntervalHours: 10 / 60
+    aiWorkHoursIntervalHours: 10 / 60,
+    aiOffHoursIntervalHours: 10 / 60
   });
   const fallbackRequest = fallbackApp.preparePorotterAiRequest();
   assert.equal(fallbackRequest.created, true);

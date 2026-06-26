@@ -14,7 +14,7 @@
     { id: 'r4', postId: 'p2', parentReplyId: 'p2', body: '最初の言葉を決める前に、誰の制約なのかを分けてみるのも良さそう。', createdAt: iso(0.9), updatedAt: iso(0.9), favorite: false, replyCount: 1, authorType: 'user', authorName: 'わたし' },
     { id: 'r5', postId: 'p2', parentReplyId: 'r4', body: '確かに、制約の持ち主を分けると「守る条件」と「交渉できる条件」が見えます。最初に二列で書き出すと設計の余白を残せそうです。', createdAt: iso(0.8), updatedAt: iso(0.8), favorite: false, replyCount: 0, authorType: 'persona', authorId: 'persona-1', authorName: '横展開の連想家' }
   ];
-  let settings = { displayName: 'わたし', email: 'me@example.com', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/preview', theme: 'system', pageSize: 20, aiAutomationIntervalHours: 6, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
+  let settings = { displayName: 'わたし', email: 'me@example.com', spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/preview', theme: 'system', pageSize: 20, aiWorkHoursIntervalHours: 6, aiOffHoursIntervalHours: 12, maxPostLength: 280, maxReplyLength: 280, maxTags: 5, maxPersonaNameLength: 40, maxPersonaRoleLength: 80, maxPersonaPromptLength: 1000 };
   let personas = [
     { id: 'persona-1', name: '横展開の連想家', role: '別業務への応用を考える人', prompt: 'ある業務で見つけた工夫、失敗、判断軸を、別の業務や手順に横展開して考えます。共通する構造を見つけ、連想ゲームのように応用先を短く示します。', enabled: true, avatarColor: 'teal', createdAt: iso(2), updatedAt: iso(2) }
   ];

@@ -158,7 +158,8 @@
     queryOne('#email-input').value = state.settings.email;
     queryOne('#theme-input').value = state.settings.theme;
     queryOne('#page-size-input').value = String(state.settings.pageSize);
-    queryOne('#ai-frequency-input').value = String(state.settings.aiAutomationIntervalHours);
+    queryOne('#ai-work-hours-frequency-input').value = String(state.settings.aiWorkHoursIntervalHours);
+    queryOne('#ai-off-hours-frequency-input').value = String(state.settings.aiOffHoursIntervalHours);
     queryOne('#data-spreadsheet-link').href = state.settings.spreadsheetUrl || '#';
     queryOne('#persona-name').maxLength = state.settings.maxPersonaNameLength;
     queryOne('#persona-role').maxLength = state.settings.maxPersonaRoleLength;

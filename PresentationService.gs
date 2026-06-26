@@ -61,14 +61,16 @@ function presentReply_(record, replyCount) {
 }
 
 function publicSettings_(settings, email) {
-  const aiAutomationIntervalHours = normalizeAiAutomationIntervalHours_(settings);
+  const aiWorkHoursIntervalHours = normalizeAiWorkHoursAutomationIntervalHours_(settings);
+  const aiOffHoursIntervalHours = normalizeAiOffHoursAutomationIntervalHours_(settings);
   return {
     displayName: String(settings.displayName || email.split('@')[0]),
     email: email,
     spreadsheetUrl: getSpreadsheet_().getUrl(),
     theme: ['system', 'light', 'dark'].indexOf(settings.theme) >= 0 ? settings.theme : 'system',
     pageSize: clampInteger_(settings.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE),
-    aiAutomationIntervalHours: aiAutomationIntervalHours,
+    aiWorkHoursIntervalHours: aiWorkHoursIntervalHours,
+    aiOffHoursIntervalHours: aiOffHoursIntervalHours,
     maxPostLength: CONFIG_.MAX_POST_LENGTH,
     maxReplyLength: CONFIG_.MAX_REPLY_LENGTH,
     maxTags: CONFIG_.MAX_TAGS,

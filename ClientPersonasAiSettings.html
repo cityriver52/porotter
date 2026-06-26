@@ -236,7 +236,8 @@
         displayName: queryOne('#display-name-input').value,
         theme: queryOne('#theme-input').value,
         pageSize: Number(queryOne('#page-size-input').value),
-        aiAutomationIntervalHours: Number(queryOne('#ai-frequency-input').value)
+        aiWorkHoursIntervalHours: Number(queryOne('#ai-work-hours-frequency-input').value),
+        aiOffHoursIntervalHours: Number(queryOne('#ai-off-hours-frequency-input').value)
       });
       applySettings();
       showToast('設定を保存しました。');

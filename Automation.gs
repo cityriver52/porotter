@@ -20,7 +20,7 @@ function preparePorotterAiRequest() {
     const persona = personas[Math.floor(Math.random() * personas.length)];
     const requests = recordsOwnedBy_(readRecords_(CONFIG_.SHEETS.AI_REQUESTS), email);
     const settings = readSettings_();
-    const automationInterval = normalizeAiAutomationIntervalHours_(settings);
+    const automationInterval = currentAiAutomationIntervalHours_(settings);
     const selected = aiAutomationRequestDue_(requests, automationInterval)
       ? chooseAiAutomationActivity_(email, persona)
       : null;

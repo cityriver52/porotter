@@ -336,15 +336,20 @@ function apiSaveSettings(payload) {
         ? payload.theme
         : 'system';
       const pageSize = clampInteger_(payload && payload.pageSize, CONFIG_.DEFAULT_PAGE_SIZE, 5, CONFIG_.MAX_PAGE_SIZE);
-      const aiAutomationIntervalHours = normalizeAiIntervalHours_(
-        payload && payload.aiAutomationIntervalHours,
+      const aiWorkHoursIntervalHours = normalizeAiIntervalHours_(
+        payload && payload.aiWorkHoursIntervalHours,
+        CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS
+      );
+      const aiOffHoursIntervalHours = normalizeAiIntervalHours_(
+        payload && payload.aiOffHoursIntervalHours,
         CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS
       );
       const updates = {
         displayName: displayName,
         theme: theme,
         pageSize: String(pageSize),
-        aiAutomationIntervalHours: String(aiAutomationIntervalHours)
+        aiWorkHoursIntervalHours: String(aiWorkHoursIntervalHours),
+        aiOffHoursIntervalHours: String(aiOffHoursIntervalHours)
       };
       writeSettings_(updates);
       return publicSettings_(Object.assign({}, readSettings_(), updates), email);

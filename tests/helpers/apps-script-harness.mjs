@@ -139,6 +139,11 @@ export function createAppsScriptHarness(root, options = {}) {
         if (format === 'yyyy-MM-dd') return `${parts.year}-${parts.month}-${parts.day}`;
         if (format === 'MM-dd') return `${parts.month}-${parts.day}`;
         if (format === 'yyyy') return parts.year;
+        if (format === 'HH:mm') {
+          return new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hour12: false
+          }).format(value);
+        }
         throw new Error(`Unsupported format: ${format}`);
       }
     },
