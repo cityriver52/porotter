@@ -119,11 +119,12 @@ function pendingAiRequestCount_(requests) {
 function aiAutomationRequestDue_(requests, intervalHours) {
   const intervalMs = aiIntervalHoursToMs_(intervalHours);
   if (!intervalMs) return false;
+  const graceMs = CONFIG_.AI_REQUEST_DUE_GRACE_SECONDS * 1000;
   const latest = (requests || [])
     .map(function (request) { return new Date(request.createdAt).getTime(); })
     .filter(Number.isFinite)
     .sort(function (a, b) { return b - a; })[0];
-  return !latest || Date.now() - latest >= intervalMs;
+  return !latest || Date.now() - latest + graceMs >= intervalMs;
 }
 
 function chooseAiAutomationActivity_(email, persona) {

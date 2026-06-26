@@ -451,6 +451,21 @@ test('AI automation interval is configurable and manual posts bypass the schedul
 
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
+    aiAutomationIntervalHours: 10 / 60
+  });
+  const slightlyEarlyTimestamp = new Date(Date.now() - (8.75 * 60 * 1000)).toISOString();
+  app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, {
+    createdAt: slightlyEarlyTimestamp,
+    updatedAt: slightlyEarlyTimestamp
+  });
+  const slightlyEarly = app.preparePorotterAiRequest();
+  assert.equal(slightlyEarly.created, true);
+  assert.equal(slightlyEarly.actionType, '新規投稿');
+  const slightlyEarlyRow = app.findRecordById_(app.__definitions.AI_REQUESTS, slightlyEarly.requestId);
+  app.patchRecord_(app.__definitions.AI_REQUESTS, slightlyEarlyRow._row, { status: 'ERROR' });
+
+  app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
     aiAutomationIntervalHours: 0
   });
   const manual = app.apiRequestAiPost(persona.id).data;
