@@ -127,6 +127,7 @@ function apiUpdatePost(postId, payload) {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_POST_LENGTH, '投稿'),
         tags: JSON.stringify(normalizeTags_(payload && payload.tags)),
         sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl),
+        aiReplyDisabled: parseBoolean_(payload && payload.aiReplyDisabled),
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.ENTRIES, post._row, patch);
@@ -205,6 +206,7 @@ function apiUpdateReply(replyId, payload) {
       assertNotDeleted_(reply);
       const patch = {
         body: normalizeBody_(payload && payload.body, CONFIG_.MAX_REPLY_LENGTH, '返信'),
+        aiReplyDisabled: parseBoolean_(payload && payload.aiReplyDisabled),
         updatedAt: nowIso_()
       };
       patchRecord_(CONFIG_.SHEETS.ENTRIES, reply._row, patch);
