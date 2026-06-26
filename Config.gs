@@ -14,12 +14,9 @@ const CONFIG_ = Object.freeze({
   DEFAULT_PAGE_SIZE: 20,
   MAX_PAGE_SIZE: 50,
   TRASH_RETENTION_DAYS: 30,
-  STUDIO_REPLY_MIN_SCORE: 5.5,
-  STUDIO_REPLY_COOLDOWN_HOURS: 20,
-  STUDIO_REPLY_THEME_WINDOW_DAYS: 21,
-  STUDIO_REPLY_MAX_POST_AGE_DAYS: 45,
   AI_REQUEST_STALE_HOURS: 48,
   AI_REQUEST_PROCESS_LIMIT: 5,
+  AI_REQUEST_DUE_GRACE_SECONDS: 90,
   DEFAULT_AI_AUTOMATION_INTERVAL_HOURS: 6,
   AI_INTERVAL_MINUTES: Object.freeze([0, 10, 20, 30, 40, 50, 60, 120, 180, 360, 720, 1200, 1440, 2880, 4320, 10080]),
   AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 20 / 60, 30 / 60, 40 / 60, 50 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
@@ -38,7 +35,7 @@ const CONFIG_ = Object.freeze({
         'id', 'body', 'tags', 'createdAt', 'updatedAt',
         'favorite', 'deletedAt', 'authorEmail', 'authorType',
         'authorId', 'authorName', 'sourceLabel', 'sourceUrl',
-        'parentId', 'rootId'
+        'parentId', 'rootId', 'aiReplyDisabled'
       ])
     }),
     SETTINGS: Object.freeze({

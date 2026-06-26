@@ -38,7 +38,8 @@ function presentPost_(record, replyCount) {
     authorId: String(record.authorId || ''),
     authorName: String(record.authorName || ''),
     sourceLabel: String(record.sourceLabel || ''),
-    sourceUrl: normalizeReferenceUrl_(record.sourceUrl)
+    sourceUrl: normalizeReferenceUrl_(record.sourceUrl),
+    aiReplyDisabled: parseBoolean_(record.aiReplyDisabled)
   };
 }
 
@@ -54,7 +55,8 @@ function presentReply_(record, replyCount) {
     replyCount: Number(replyCount || 0),
     authorType: String(record.authorType || 'user'),
     authorId: String(record.authorId || ''),
-    authorName: String(record.authorName || '')
+    authorName: String(record.authorName || ''),
+    aiReplyDisabled: parseBoolean_(record.aiReplyDisabled)
   };
 }
 

@@ -29,10 +29,11 @@ test('setup, CRUD, replies, trash and search work as one flow', () => {
   assert.equal(setup.allowedEmail, 'owner@example.com');
   assert.equal(app.checkPorotterSetup().configured, true);
 
-  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'], sourceUrl: 'https://example.com/reference' });
+  const first = app.apiCreatePost({ body: '<script>alert(1)</script> 気づき', tags: ['学び', '#違和感'], sourceUrl: 'https://example.com/reference', aiReplyDisabled: true });
   assert.equal(first.ok, true);
   assert.deepEqual(Array.from(first.data.tags), ['学び', '違和感']);
   assert.equal(first.data.sourceUrl, 'https://example.com/reference');
+  assert.equal(first.data.aiReplyDisabled, true);
 
   const second = app.apiCreatePost({ body: '=SUM(A1:A2)', tags: ['アイデア'] });
   assert.equal(second.ok, true);
@@ -46,8 +47,9 @@ test('setup, CRUD, replies, trash and search work as one flow', () => {
   timeline = app.apiTimeline({ favoriteOnly: true });
   assert.equal(timeline.data.total, 1);
 
-  const reply = app.apiCreateReply(first.data.id, { body: '翌日の追記' });
+  const reply = app.apiCreateReply(first.data.id, { body: '翌日の追記', aiReplyDisabled: true });
   assert.equal(reply.ok, true);
+  assert.equal(reply.data.aiReplyDisabled, true);
   let thread = app.apiThread(first.data.id);
   assert.equal(thread.data.replies.length, 1);
   assert.equal(thread.data.post.replyCount, 1);
@@ -173,10 +175,14 @@ test('the GAS queue and standard Workspace Studio handoff create attributed AI p
   assert.equal(queued.status, 'REQUESTED');
   assert.equal(queued.personaId, saved.data.id);
   const generationPrompt = queued.generationPrompt;
-  assert.match(generationPrompt, /このAIRequests行の個別指示/);
-  assert.match(generationPrompt, /疑似アカウント名: 経理の見張り番/);
+  const promptPayload = JSON.parse(generationPrompt);
+  assert.equal(Object.hasOwn(promptPayload, 'version'), false);
+  assert.equal(promptPayload.type, 'post');
+  assert.equal(promptPayload.persona.name, '経理の見張り番');
+  assert.ok(generationPrompt.length < 1000);
   assert.doesNotMatch(generationPrompt, /Google Workspaceの次の情報/);
   const commonPrompt = app.workspaceStudioCommonPrompt_();
+  assert.match(commonPrompt, /generationPromptはJSON/);
   assert.match(commonPrompt, /過去7日/);
   assert.match(commonPrompt, /Google Drive/);
   assert.match(commonPrompt, /Gmail/);
@@ -257,15 +263,18 @@ test('persona history is injected into AI post prompts to reduce repetition', ()
     sourceUrl: 'https://docs.google.com/spreadsheets/d/progress-sheet'
   }));
 
-  const prompt = app.buildPersonaGenerationPrompt_('owner@example.com', persona, { type: 'post' });
-  assert.match(prompt, /直近の同じ疑似アカウントの投稿/);
-  assert.match(prompt, /会議の前に、資料より先に論点を並べ替えると見え方が変わる/);
-  assert.match(prompt, /同じ課題でも、締切直前と翌朝では気づきの粒度が違う/);
-  assert.match(prompt, /同じ論点、同じ言い回し、同じ結論は避けてください/);
-  assert.match(prompt, /最近この疑似アカウントが参照済みのWorkspace情報/);
-  assert.match(prompt, /https:\/\/docs\.google\.com\/document\/d\/meeting-note/);
-  assert.match(prompt, /https:\/\/docs\.google\.com\/spreadsheets\/d\/progress-sheet/);
-  assert.match(prompt, /同じファイル、同じURL、同じスレッド、同じメールをできるだけ避け/);
+  const prompt = JSON.parse(app.buildPersonaGenerationPrompt_('owner@example.com', persona, { type: 'post' }));
+  assert.equal(prompt.type, 'post');
+  assert.equal(prompt.recentPersonaPosts.length, 2);
+  const recentBodies = prompt.recentPersonaPosts.map(post => post.body).join('\n');
+  assert.match(recentBodies, /同じ課題でも、締切直前と翌朝では気づきの粒度が違う/);
+  assert.match(recentBodies, /会議の前に、資料より先に論点を並べ替えると見え方が変わる/);
+  assert.equal(prompt.recentPersonaSources.length, 2);
+  assert.deepEqual(new Set(prompt.recentPersonaSources.map(source => source.sourceUrl)), new Set([
+    'https://docs.google.com/document/d/meeting-note',
+    'https://docs.google.com/spreadsheets/d/progress-sheet'
+  ]));
+  assert.match(app.workspaceStudioCommonPrompt_(), /同じファイル、同じURL、同じスレッド、同じメールをできるだけ避け/);
 });
 
 test('designed serendipity chooses unfinished thoughts instead of replying by chance', () => {
@@ -278,39 +287,51 @@ test('designed serendipity chooses unfinished thoughts instead of replying by ch
     enabled: true
   }).data;
   const first = app.apiCreatePost({ body: 'この手順の本当の目的は何だろう？', tags: ['問い'] }).data;
-  const second = app.apiCreatePost({ body: '会議前に資料を共有した。', tags: ['記録'] }).data;
+  const second = app.apiCreatePost({ body: '会議前に資料を共有した。', tags: ['記録'], aiReplyDisabled: true }).data;
   const third = app.apiCreatePost({ body: '引き継ぎで迷った点を、次回はどう改善できるだろう。', tags: ['引き継ぎ'] }).data;
-  app.apiCreatePost({ body: '引き継ぎの説明順を少し変えた。', tags: ['引き継ぎ'] });
+  app.apiCreatePost({ body: '引き継ぎの説明順を少し変えた。', tags: ['引き継ぎ'], aiReplyDisabled: true });
 
   const replyActivity = app.chooseStudioActivity_('owner@example.com', persona);
   assert.equal(replyActivity.type, 'reply-choice');
-  assert.ok(replyActivity.context.candidatePostIds.includes(first.id));
-  assert.ok(replyActivity.context.candidatePostIds.includes(third.id));
-  assert.ok(!replyActivity.context.candidatePostIds.includes(second.id));
-  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最も有意義に議論/);
-  assert.match(app.buildPersonaGenerationPrompt_(persona, replyActivity), /最近繰り返されたテーマ/);
+  assert.equal(replyActivity.context.candidatePostIds.length, 1);
+  const selectedPostId = replyActivity.context.candidatePostIds[0];
+  assert.ok([first.id, third.id].includes(selectedPostId));
+  assert.notEqual(selectedPostId, second.id);
+  const replyPrompt = JSON.parse(app.buildPersonaGenerationPrompt_(persona, replyActivity));
+  assert.equal(replyPrompt.type, 'reply-choice');
+  assert.equal(replyPrompt.candidates.length, 1);
+  assert.equal(replyPrompt.candidates[0].id, selectedPostId);
+  assert.match(app.workspaceStudioCommonPrompt_(), /最も有意義に議論/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /AI返信不要/);
   assert.match(app.workspaceStudioCommonPrompt_(), /Google Chat/);
-  const newPostPrompt = app.buildPersonaGenerationPrompt_(persona, { type: 'post' });
-  assert.match(newPostPrompt, /自分のためにつぶやく独り言/);
-  assert.match(newPostPrompt, /上限まで文字数を埋めない/);
-  assert.match(newPostPrompt, /相手への問いかけではなく/);
+  const newPostPrompt = JSON.parse(app.buildPersonaGenerationPrompt_(persona, { type: 'post' }));
+  assert.equal(newPostPrompt.type, 'post');
+  assert.match(app.workspaceStudioCommonPrompt_(), /自分のためにつぶやく独り言/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /上限まで文字数を埋めない/);
+  assert.match(app.workspaceStudioCommonPrompt_(), /相手への問いかけではなく/);
 
   const published = app.publishGeneratedPorotter_('owner@example.com', persona.id, replyActivity.context, JSON.stringify({
-    targetPostId: first.id,
+    targetPostId: selectedPostId,
     body: '手順を守ることと目的を満たすことを分けてみると、残すべき工程が見えそうです。次回は「この工程がないと誰が困るか」から確かめてはどうでしょう。'
   }));
   assert.equal(published.entryType, 'reply');
-  assert.equal(published.postId, first.id);
+  assert.equal(published.postId, selectedPostId);
   assert.ok(published.replyId);
-  const thread = app.apiThread(first.id).data;
+  const thread = app.apiThread(selectedPostId).data;
   assert.equal(thread.replies.length, 1);
   assert.equal(thread.replies[0].authorType, 'persona');
   assert.equal(thread.replies[0].authorName, persona.name);
-  assert.equal(thread.replies[0].parentReplyId, first.id);
-  assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
+  assert.equal(thread.replies[0].parentReplyId, selectedPostId);
+  const nextActivity = app.chooseStudioActivity_('owner@example.com', persona);
+  if (nextActivity.type === 'reply-choice') {
+    assert.notEqual(nextActivity.context.candidatePostIds[0], selectedPostId);
+    assert.notEqual(nextActivity.context.candidatePostIds[0], second.id);
+  } else {
+    assert.equal(nextActivity.type, 'post');
+  }
   assert.throws(() => app.publishGeneratedPorotter_(
     'owner@example.com', persona.id, replyActivity.context,
-    JSON.stringify({ targetPostId: first.id, body: '重複返信' })
+    JSON.stringify({ targetPostId: selectedPostId, body: '重複返信' })
   ), /すでにAIが返信/);
 });
 
@@ -439,6 +460,21 @@ test('AI automation interval is configurable and manual posts bypass the schedul
 
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
+    aiAutomationIntervalHours: 10 / 60
+  });
+  const slightlyEarlyTimestamp = new Date(Date.now() - (8.75 * 60 * 1000)).toISOString();
+  app.patchRecord_(app.__definitions.AI_REQUESTS, row._row, {
+    createdAt: slightlyEarlyTimestamp,
+    updatedAt: slightlyEarlyTimestamp
+  });
+  const slightlyEarly = app.preparePorotterAiRequest();
+  assert.equal(slightlyEarly.created, true);
+  assert.equal(slightlyEarly.actionType, '新規投稿');
+  const slightlyEarlyRow = app.findRecordById_(app.__definitions.AI_REQUESTS, slightlyEarly.requestId);
+  app.patchRecord_(app.__definitions.AI_REQUESTS, slightlyEarlyRow._row, { status: 'ERROR' });
+
+  app.apiSaveSettings({
+    displayName: 'owner', theme: 'system', pageSize: 20,
     aiAutomationIntervalHours: 0
   });
   const manual = app.apiRequestAiPost(persona.id).data;
@@ -506,14 +542,18 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
     tags: ['引き継ぎ']
   }));
   const aiPostId = aiPostResult.postId;
+  const skippedReply = app.apiCreateReply(aiPostId, { body: 'これはAI返信不要にする。', aiReplyDisabled: true }).data;
   const userReply = app.apiCreateReply(aiPostId, { body: '最初に何を確認すれば迷いにくいでしょう？' }).data;
 
   const priorityActivity = app.chooseStudioActivity_('owner@example.com', persona);
   assert.equal(priorityActivity.type, 'reply-to-user');
   assert.equal(priorityActivity.context.postId, aiPostId);
   assert.equal(priorityActivity.context.parentReplyId, userReply.id);
-  const priorityPrompt = app.buildPersonaGenerationPrompt_(persona, priorityActivity);
-  assert.match(priorityPrompt, /ユーザーから届いた返信/);
+  assert.notEqual(priorityActivity.context.parentReplyId, skippedReply.id);
+  const priorityPrompt = JSON.parse(app.buildPersonaGenerationPrompt_(persona, priorityActivity));
+  assert.equal(priorityPrompt.type, 'reply-to-user');
+  assert.equal(priorityPrompt.targetReply.id, userReply.id);
+  assert.match(app.workspaceStudioCommonPrompt_(), /targetReplyで示されたユーザーの考えに直接応答/);
   assert.match(app.workspaceStudioCommonPrompt_(), /Gmail/);
   assert.match(app.workspaceStudioCommonPrompt_(), /フォロー状態を確認できない返信も対象外/);
 
@@ -522,9 +562,9 @@ test('Workspace Studio prioritizes unanswered user replies to AI posts and does 
   }));
 
   const thread = app.apiThread(aiPostId).data;
-  assert.equal(thread.replies.length, 2);
-  assert.equal(thread.replies[1].authorType, 'persona');
-  assert.equal(thread.replies[1].parentReplyId, userReply.id);
+  assert.equal(thread.replies.length, 3);
+  assert.equal(thread.replies[2].authorType, 'persona');
+  assert.equal(thread.replies[2].parentReplyId, userReply.id);
   assert.equal(app.chooseStudioActivity_('owner@example.com', persona).type, 'post');
 
   assert.throws(() => app.publishGeneratedPorotter_(

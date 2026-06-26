@@ -34,6 +34,21 @@ const timelineTargetEnd = client.indexOf('  function handleTimelineKeydown(event
 if (timelineTargetStart < 0 || timelineTargetEnd < 0) throw new Error('Post-card thread navigation helper was not found.');
 vm.runInContext(`${client.slice(timelineTargetStart, timelineTargetEnd)}\nthis.timelinePostIdFromEvent = timelinePostIdFromEvent;`, context);
 
+const syncFilterStart = client.indexOf('  function syncTimelineFilters()');
+const syncFilterEnd = client.indexOf('  function applySyncData(data, options = {})');
+if (syncFilterStart < 0 || syncFilterEnd < 0) throw new Error('Sync filter helper was not found.');
+const syncContext = vm.createContext({});
+vm.runInContext(`
+  const state = {
+    filters: { query: '', tag: '', startDate: '', endDate: '', replyState: '', favoriteOnly: false, authorType: '', offset: 40 },
+    settings: { pageSize: 20 },
+    posts: Array.from({ length: 37 }, (_, index) => ({ id: String(index) }))
+  };
+  ${client.slice(syncFilterStart, syncFilterEnd)}
+  this.syncTimelineFilters = syncTimelineFilters;
+  this.state = state;
+`, syncContext);
+
 const postHtmlStart = client.indexOf('  function postHtml(post, options = {})');
 const postHtmlEnd = client.indexOf('  function renderTagFilters()');
 if (postHtmlStart < 0 || postHtmlEnd < 0) throw new Error('Post renderer was not found.');
@@ -115,6 +130,14 @@ test('post-card clicks open threads but interactive controls keep their own acti
   assert.equal(context.timelinePostIdFromEvent({ target: cardTarget }), 'post-123');
   assert.equal(context.timelinePostIdFromEvent({ target: linkTarget }), '');
   assert.equal(context.timelinePostIdFromEvent({ target: null }), '');
+});
+
+test('background sync refreshes the first loaded timeline page', () => {
+  const filters = syncContext.syncTimelineFilters();
+
+  assert.equal(filters.offset, 0);
+  assert.equal(filters.pageSize, 37);
+  assert.equal(syncContext.state.filters.offset, 40);
 });
 
 test('post cards render separate reference links and account-specific AI colors', () => {

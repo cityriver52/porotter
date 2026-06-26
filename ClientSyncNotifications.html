@@ -77,7 +77,7 @@
       const includeTimeline = options.includeTimeline !== false;
       const data = await callApi('apiSync', {
         sync: state.sync.cursor,
-        filters: state.filters,
+        filters: syncTimelineFilters(),
         includeTimeline: includeTimeline,
         includeNotifications: options.includeNotifications === true,
         processAiResponses: options.processAiResponses !== false
@@ -87,6 +87,15 @@
     } finally {
       state.sync.inFlight = false;
     }
+  }
+
+
+  function syncTimelineFilters() {
+    const filters = Object.assign({}, state.filters, { offset: 0 });
+    const loadedCount = Array.isArray(state.posts) ? state.posts.length : 0;
+    const configuredPageSize = Number(state.settings && state.settings.pageSize || 0);
+    filters.pageSize = Math.max(5, loadedCount || configuredPageSize || 20);
+    return filters;
   }
 
 

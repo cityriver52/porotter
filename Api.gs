@@ -110,7 +110,8 @@ function apiCreatePost(payload) {
         email: email,
         body: payload && payload.body,
         tags: payload && payload.tags,
-        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl)
+        sourceUrl: validateReferenceUrl_(payload && payload.sourceUrl),
+        aiReplyDisabled: payload && payload.aiReplyDisabled
       });
       appendRecord_(CONFIG_.SHEETS.ENTRIES, post);
       touchContentUpdated_();
@@ -187,6 +188,7 @@ function apiCreateReply(postId, payload) {
         parentId: parent.id,
         email: email,
         body: payload && payload.body,
+        aiReplyDisabled: payload && payload.aiReplyDisabled,
         authorType: 'user',
         authorId: email,
         authorName: String(settings.displayName || email.split('@')[0])
