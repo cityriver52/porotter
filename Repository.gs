@@ -167,8 +167,11 @@ function ensureDefaultSettings_(email) {
   if (!settings.displayName) defaults.displayName = email.split('@')[0];
   if (!settings.theme) defaults.theme = 'system';
   if (!settings.pageSize) defaults.pageSize = String(CONFIG_.DEFAULT_PAGE_SIZE);
-  if (settings.aiAutomationIntervalHours === undefined) {
-    defaults.aiAutomationIntervalHours = String(normalizeAiAutomationIntervalHours_(settings));
+  if (settings.aiWorkHoursIntervalHours === undefined) {
+    defaults.aiWorkHoursIntervalHours = String(normalizeAiWorkHoursAutomationIntervalHours_(settings));
+  }
+  if (settings.aiOffHoursIntervalHours === undefined) {
+    defaults.aiOffHoursIntervalHours = String(normalizeAiOffHoursAutomationIntervalHours_(settings));
   }
   if (!settings.notificationsReadAt) defaults.notificationsReadAt = nowIso_();
   if (!settings.contentUpdatedAt) defaults.contentUpdatedAt = nowIso_();

@@ -79,7 +79,7 @@ const studioFile = fs.readFileSync(path.join(root, 'Studio.gs'), 'utf8');
 for (const requiredContext of ['Google Drive', 'Gmail', 'Google Chat', 'フォローしていないスレッド', 'フォロー状態を確認できない返信']) {
   if (!studioFile.includes(requiredContext)) errors.push(`Studio.gs: Workspace context rule is missing: ${requiredContext}`);
 }
-for (const requiredUi of ['id="setup-screen"', 'data-view="mine"', 'data-view="notifications"', 'id="manual-ai-post-button"', 'id="ai-frequency-input"', 'id="data-spreadsheet-link"']) {
+for (const requiredUi of ['id="setup-screen"', 'data-view="mine"', 'data-view="notifications"', 'id="manual-ai-post-button"', 'id="ai-work-hours-frequency-input"', 'id="ai-off-hours-frequency-input"', 'id="data-spreadsheet-link"']) {
   if (!index.includes(requiredUi)) errors.push(`Index.html: required web UI is missing: ${requiredUi}`);
 }
 for (const requiredUi of ['id="post-source-url"', 'id="edit-source-url"']) {

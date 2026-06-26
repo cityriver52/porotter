@@ -18,6 +18,8 @@ const CONFIG_ = Object.freeze({
   AI_REQUEST_PROCESS_LIMIT: 5,
   AI_REQUEST_DUE_GRACE_SECONDS: 90,
   DEFAULT_AI_AUTOMATION_INTERVAL_HOURS: 6,
+  AI_WORK_HOURS_START_MINUTE: 8 * 60 + 45,
+  AI_WORK_HOURS_END_MINUTE: 17 * 60 + 15,
   AI_INTERVAL_MINUTES: Object.freeze([0, 10, 20, 30, 40, 50, 60, 120, 180, 360, 720, 1200, 1440, 2880, 4320, 10080]),
   AI_INTERVAL_HOURS: Object.freeze([0, 10 / 60, 20 / 60, 30 / 60, 40 / 60, 50 / 60, 1, 2, 3, 6, 12, 20, 24, 48, 72, 168]),
   PERSONA_AVATAR_COLORS: Object.freeze(['violet', 'indigo', 'teal', 'green', 'amber', 'rose']),
@@ -177,10 +179,35 @@ function normalizeAiIntervalHours_(value, fallback) {
 }
 
 function normalizeAiAutomationIntervalHours_(settings) {
-  const source = settings && settings.aiAutomationIntervalHours !== undefined
-    ? settings.aiAutomationIntervalHours
+  return normalizeAiWorkHoursAutomationIntervalHours_(settings);
+}
+
+function normalizeAiWorkHoursAutomationIntervalHours_(settings) {
+  const source = settings && settings.aiWorkHoursIntervalHours !== undefined
+    ? settings.aiWorkHoursIntervalHours
     : CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS;
   return normalizeAiIntervalHours_(source, CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS);
+}
+
+function normalizeAiOffHoursAutomationIntervalHours_(settings) {
+  const source = settings && settings.aiOffHoursIntervalHours !== undefined
+    ? settings.aiOffHoursIntervalHours
+    : CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS;
+  return normalizeAiIntervalHours_(source, CONFIG_.DEFAULT_AI_AUTOMATION_INTERVAL_HOURS);
+}
+
+function currentAiAutomationIntervalHours_(settings, date) {
+  return isAiWorkHours_(date || new Date())
+    ? normalizeAiWorkHoursAutomationIntervalHours_(settings)
+    : normalizeAiOffHoursAutomationIntervalHours_(settings);
+}
+
+function isAiWorkHours_(date) {
+  const time = Utilities.formatDate(date || new Date(), Session.getScriptTimeZone(), 'HH:mm');
+  const parts = String(time).split(':').map(Number);
+  if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return false;
+  const minutes = parts[0] * 60 + parts[1];
+  return minutes >= CONFIG_.AI_WORK_HOURS_START_MINUTE && minutes <= CONFIG_.AI_WORK_HOURS_END_MINUTE;
 }
 
 function aiIntervalHoursToMinutes_(value) {

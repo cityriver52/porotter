@@ -249,6 +249,7 @@
   .status-pill.active { background: #e4f7eb; color: #1b7a42; }
   :root[data-theme="dark"] .status-pill.active { background: #173b28; color: #7bdda3; }
   .manual-ai-row { display: grid; grid-template-columns: minmax(180px, 1fr) auto; align-items: end; gap: 10px; padding: 14px; border-radius: 14px; background: var(--surface-soft); }
+  .ai-frequency-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
   .notification-list { display: grid; }
   .notification-card { display: grid; grid-template-columns: 10px 1fr; gap: 10px; width: 100%; padding: 16px 20px; border: 0; border-bottom: 1px solid var(--line); background: var(--surface); color: var(--text); text-align: left; }
@@ -365,6 +366,7 @@
     .post-menu { right: 6px; }
     .settings-card, .notice-card { margin: 12px; }
     .manual-ai-row { grid-template-columns: 1fr; }
+    .ai-frequency-grid { grid-template-columns: 1fr; }
     .app-dialog { width: 100%; max-width: none; max-height: 90vh; margin: auto 0 0; border-radius: 20px 20px 0 0; }
     .app-dialog[open] { animation: dialog-up .2s ease-out; }
     @keyframes dialog-up { from { transform: translateY(30px); opacity: 0; } }
