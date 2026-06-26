@@ -152,8 +152,10 @@
     queryOne('#edit-body').value = post.body;
     queryOne('#edit-tags').value = (post.tags || []).map(tag => '#' + tag).join(' ');
     queryOne('#edit-source-url').value = post.sourceUrl || '';
+    queryOne('#edit-ai-reply-disabled').checked = Boolean(post.aiReplyDisabled);
     queryOne('#edit-tags-label').hidden = false;
     queryOne('#edit-source-url-label').hidden = false;
+    queryOne('#edit-ai-reply-disabled-label').hidden = false;
     queryOne('#edit-dialog').showModal();
     queryOne('#edit-body').focus();
   }
@@ -167,8 +169,10 @@
     queryOne('#edit-body').value = reply.body;
     queryOne('#edit-tags').value = '';
     queryOne('#edit-source-url').value = '';
+    queryOne('#edit-ai-reply-disabled').checked = Boolean(reply.aiReplyDisabled);
     queryOne('#edit-tags-label').hidden = true;
     queryOne('#edit-source-url-label').hidden = true;
+    queryOne('#edit-ai-reply-disabled-label').hidden = false;
     queryOne('#edit-dialog').showModal();
     queryOne('#edit-body').focus();
   }
@@ -184,13 +188,17 @@
         const updated = await callApi('apiUpdatePost', state.editTarget.id, {
           body: queryOne('#edit-body').value,
           tags: parseTagInput(queryOne('#edit-tags').value),
-          sourceUrl: queryOne('#edit-source-url').value
+          sourceUrl: queryOne('#edit-source-url').value,
+          aiReplyDisabled: queryOne('#edit-ai-reply-disabled').checked
         });
         const index = state.posts.findIndex(item => item.id === updated.id);
         if (index >= 0) state.posts[index] = updated;
         if (state.thread && state.thread.post.id === updated.id) state.thread.post = updated;
       } else {
-        const updated = await callApi('apiUpdateReply', state.editTarget.id, { body: queryOne('#edit-body').value });
+        const updated = await callApi('apiUpdateReply', state.editTarget.id, {
+          body: queryOne('#edit-body').value,
+          aiReplyDisabled: queryOne('#edit-ai-reply-disabled').checked
+        });
         const index = state.thread.replies.findIndex(item => item.id === updated.id);
         if (index >= 0) state.thread.replies[index] = updated;
       }

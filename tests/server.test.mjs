@@ -54,9 +54,19 @@ test('setup, CRUD, replies, trash and search work as one flow', () => {
   assert.equal(thread.data.replies.length, 1);
   assert.equal(thread.data.post.replyCount, 1);
 
-  const updated = app.apiUpdatePost(first.data.id, { body: '更新した本文', tags: ['学び'], sourceUrl: 'https://example.com/updated' });
+  const updated = app.apiUpdatePost(first.data.id, {
+    body: '更新した本文',
+    tags: ['学び'],
+    sourceUrl: 'https://example.com/updated',
+    aiReplyDisabled: false
+  });
   assert.equal(updated.data.body, '更新した本文');
   assert.equal(updated.data.sourceUrl, 'https://example.com/updated');
+  assert.equal(updated.data.aiReplyDisabled, false);
+
+  const updatedReply = app.apiUpdateReply(reply.data.id, { body: '翌日の追記を更新', aiReplyDisabled: false });
+  assert.equal(updatedReply.data.body, '翌日の追記を更新');
+  assert.equal(updatedReply.data.aiReplyDisabled, false);
 
   assert.equal(app.apiDeletePost(first.data.id).ok, true);
   assert.equal(app.apiTrash().data.posts.length, 1);
