@@ -471,6 +471,7 @@ test('AI automation interval is configurable and manual posts bypass the schedul
   assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T00:00:00.000Z')), 10 / 60);
   assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T08:15:00.000Z')), 10 / 60);
   assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-01T08:16:00.000Z')), 6);
+  assert.equal(app.currentAiAutomationIntervalHours_(splitSettings, new Date('2026-01-04T00:00:00.000Z')), 6);
   app.apiSaveSettings({
     displayName: 'owner', theme: 'system', pageSize: 20,
     aiWorkHoursIntervalHours: 1,

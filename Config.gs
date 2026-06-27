@@ -203,7 +203,12 @@ function currentAiAutomationIntervalHours_(settings, date) {
 }
 
 function isAiWorkHours_(date) {
-  const time = Utilities.formatDate(date || new Date(), Session.getScriptTimeZone(), 'HH:mm');
+  const current = date || new Date();
+  const timeZone = Session.getScriptTimeZone();
+  const dateKey = Utilities.formatDate(current, timeZone, 'yyyy-MM-dd');
+  const weekday = new Date(dateKey + 'T00:00:00Z').getUTCDay();
+  if (weekday === 0 || weekday === 6) return false;
+  const time = Utilities.formatDate(current, timeZone, 'HH:mm');
   const parts = String(time).split(':').map(Number);
   if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return false;
   const minutes = parts[0] * 60 + parts[1];
